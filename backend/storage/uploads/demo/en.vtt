@@ -1,0 +1,54 @@
+WEBVTT
+NOTE
+Demo subtitle track for the AniZora sample catalogue.
+Original placeholder text, written to exercise the player's subtitle pipeline:
+track selection, styling, positioning and the Off switch.
+
+STYLE
+::cue {
+  background-color: rgba(0, 0, 0, 0.65);
+}
+
+1
+00:00:02.000 --> 00:00:07.000
+This is the English demo subtitle track.
+
+2
+00:00:07.500 --> 00:00:13.000
+If you can read this, WebVTT parsing and rendering are working.
+
+3
+00:00:15.000 --> 00:00:21.000
+The intro marker ends around here — try the Skip Intro button.
+
+4
+00:00:24.000 --> 00:00:30.000
+Open the settings menu to change subtitle size, colour and background.
+
+5
+00:00:33.000 --> 00:00:39.000
+Switch quality from the same menu. Playback position is preserved.
+
+6
+00:00:42.000 --> 00:00:48.000
+A mid-roll ad cue point sits at 45 seconds when video ads are enabled.
+
+7
+00:00:51.000 --> 00:00:57.000
+Switch audio to English Dub — the tone changes from 440Hz to 660Hz.
+
+8
+00:01:00.000 --> 00:01:06.000
+Try seeking. The burnt-in timer should match the scrub bar exactly.
+
+9
+00:01:09.000 --> 00:01:15.000
+Keyboard shortcuts: space, arrows, F, M, P, and number keys 0-9.
+
+10
+00:01:18.000 --> 00:01:26.000
+The outro marker begins at 78 seconds — Skip Outro appears there.
+
+11
+00:01:27.000 --> 00:01:30.000
+End of the demo track.

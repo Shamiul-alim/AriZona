@@ -1,0 +1,293 @@
+@import 'tailwindcss';
+
+/* ============================================================================
+   AniZora design system
+   ----------------------------------------------------------------------------
+   An original dark, cinematic theme. Every colour, radius, shadow and easing
+   used anywhere in the app resolves to a token defined here, so the whole
+   platform can be rebranded by editing this block alone.
+   ========================================================================== */
+
+@theme {
+  /* Surfaces — near-black with a violet cast rather than neutral grey, which
+     keeps posters and key art feeling warm against the chrome. */
+  --color-void: #06060c;
+  --color-base: #0a0a13;
+  --color-surface: #10101d;
+  --color-surface-2: #171729;
+  --color-surface-3: #1f1f35;
+  --color-line: #262640;
+  --color-line-soft: #1c1c30;
+
+  /* Brand */
+  --color-brand: #7c5cff;
+  --color-brand-bright: #9a80ff;
+  --color-brand-dim: #5b3fd6;
+  --color-accent: #22e1c8;
+  --color-accent-dim: #14b8a3;
+  --color-hot: #ff4d8d;
+  --color-gold: #ffc861;
+
+  /* Text */
+  --color-ink: #f2f3fb;
+  --color-ink-soft: #b9bdd2;
+  --color-ink-muted: #7e849e;
+  --color-ink-faint: #565b73;
+
+  /* Status */
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #f8607a;
+
+  /* Type scale */
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+
+  /* Radii */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* Elevation. Dark UIs read better with a glow than with a drop shadow. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(0 0 0 / 0.8);
+  --shadow-lift: 0 4px 12px rgb(0 0 0 / 0.55), 0 24px 48px -20px rgb(0 0 0 / 0.9);
+  --shadow-glow: 0 0 0 1px rgb(124 92 255 / 0.35), 0 0 32px -6px rgb(124 92 255 / 0.45);
+  --shadow-glow-accent: 0 0 0 1px rgb(34 225 200 / 0.35), 0 0 28px -8px rgb(34 225 200 / 0.4);
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line-soft);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* A single ambient gradient behind everything. Fixed, so it does not repaint
+     on scroll — the cinematic feel costs nothing at runtime. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgb(124 92 255 / 0.16), transparent 70%),
+      radial-gradient(ellipse 60% 40% at 90% 10%, rgb(34 225 200 / 0.07), transparent 70%),
+      radial-gradient(ellipse 50% 40% at 5% 30%, rgb(255 77 141 / 0.06), transparent 70%);
+  }
+
+  ::selection {
+    background: rgb(124 92 255 / 0.45);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Scrollbars, themed to match the surface palette. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-base);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-3);
+    border-radius: 99px;
+    border: 2px solid var(--color-base);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-line);
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+}
+
+@layer components {
+  /* Horizontal rails hide their scrollbar but stay fully keyboard/touch
+     scrollable. */
+  .rail {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .card-surface {
+    background: linear-gradient(160deg, var(--color-surface) 0%, var(--color-base) 100%);
+    border: 1px solid var(--color-line-soft);
+    border-radius: var(--radius-lg);
+  }
+
+  .glass {
+    background: rgb(16 16 29 / 0.72);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgb(38 38 64 / 0.7);
+  }
+
+  /* Two-line clamp used by card titles and post excerpts. */
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--color-surface-2);
+  }
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.05), transparent);
+    animation: shimmer 1.6s infinite;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(124 92 255 / 0.45); }
+  70% { box-shadow: 0 0 0 14px rgb(124 92 255 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(124 92 255 / 0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s var(--ease-out-soft) both;
+}
+
+.animate-float {
+  animation: float-slow 6s ease-in-out infinite;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite;
+}
+
+/* ----------------------------------------------------------------------------
+   Reduced motion.
+   Animation here is decorative without exception, so it is switched off wholesale
+   rather than merely shortened. Nothing below conveys information on its own.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton::after {
+    animation: none;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Player-specific styling.
+   Native cues are replaced by our own renderer so subtitle size, colour,
+   background and position stay configurable — see SubtitleLayer.
+   -------------------------------------------------------------------------- */
+video::cue {
+  visibility: hidden;
+}
+
+video::-webkit-media-text-track-container {
+  display: none;
+}
+
+.player-root:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+
+.player-root:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+
+/* Range inputs (seek bar, volume) styled consistently across engines. */
+.player-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.player-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-brand-bright);
+  box-shadow: 0 0 0 4px rgb(124 92 255 / 0.25);
+  transition: transform 0.15s var(--ease-out-soft);
+}
+.player-range::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+.player-range::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-brand-bright);
+}

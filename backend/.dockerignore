@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+.env
+.env.*
+!.env.example
+storage/uploads/*
+!storage/uploads/demo
+!storage/uploads/.gitkeep
+*.log
+.git
+.gitignore
+README.md
+test
+**/*.spec.ts
+**/*.e2e-spec.ts

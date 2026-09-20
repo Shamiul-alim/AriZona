@@ -1,0 +1,1475 @@
+// =============================================================================
+// AniZora — PostgreSQL schema
+// =============================================================================
+// Design notes that are NOT obvious from the field names:
+//
+//  * Media is modelled as Episode -> MediaSource -> MediaVariant. A MediaSource
+//    is one "server" AND one audio flavour (SUB/DUB + language), because with
+//    progressive files (Google Drive / MP4) the browser cannot switch the audio
+//    track inside a container. Switching audio therefore means switching
+//    MediaSource, and the player restores playback position across the swap.
+//    AudioTrack exists for HLS/DASH sources where in-container switching IS
+//    possible. See docs/PLAYER.md.
+//
+//  * View counting uses an append-only *View table for auditing plus a daily
+//    rollup (*ViewStat) so "trending this month" is a single indexed scan
+//    instead of counting millions of rows.
+//
+//  * Anything a moderator can remove uses a soft-delete flag rather than a hard
+//    delete, so reports stay auditable after the content is taken down.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Runtime queries go through the pooled connection (PgBouncer, port 6543 on
+  // Supabase). Migrations cannot run over a transaction-mode pooler, so they
+  // use the direct session connection instead. Locally both point at the same
+  // Postgres and DIRECT_URL simply falls back to DATABASE_URL.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  PENDING_VERIFICATION
+}
+
+enum TitlePreference {
+  ENGLISH
+  JAPANESE
+}
+
+enum AnimeType {
+  TV
+  MOVIE
+  OVA
+  ONA
+  SPECIAL
+  TV_SHORT
+  TV_SPECIAL
+  MUSIC
+  OTHER
+}
+
+enum AnimeStatus {
+  ONGOING
+  COMPLETED
+  UPCOMING
+  HIATUS
+  CANCELLED
+}
+
+enum AnimeSeason {
+  WINTER
+  SPRING
+  SUMMER
+  FALL
+}
+
+enum AgeRating {
+  G
+  PG
+  PG_13
+  R_17
+  R_PLUS
+  RX
+}
+
+enum AnimeSource {
+  ORIGINAL
+  MANGA
+  LIGHT_NOVEL
+  NOVEL
+  VISUAL_NOVEL
+  GAME
+  WEB_MANGA
+  FOUR_KOMA
+  MUSIC
+  OTHER
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AnimeTitleKind {
+  ENGLISH
+  JAPANESE
+  ROMAJI
+  SYNONYM
+}
+
+enum RelationKind {
+  SEQUEL
+  PREQUEL
+  SIDE_STORY
+  SPIN_OFF
+  ALTERNATIVE
+  SUMMARY
+  PARENT_STORY
+  FULL_STORY
+  OTHER
+}
+
+/// Storage/delivery backend for a media source. Adding a new backend means
+/// implementing one provider class — no schema or business-logic changes.
+enum MediaProvider {
+  GOOGLE_DRIVE
+  HLS
+  DIRECT_FILE
+  OBJECT_STORAGE
+  EXTERNAL_EMBED
+}
+
+enum MediaKind {
+  SUB
+  DUB
+}
+
+enum VideoQuality {
+  Q_2160P
+  Q_1440P
+  Q_1080P
+  Q_720P
+  Q_480P
+  Q_360P
+  Q_240P
+  AUTO
+}
+
+enum SubtitleFormat {
+  VTT
+  SRT
+  ASS
+}
+
+enum WatchStatus {
+  WATCHING
+  COMPLETED
+  PLAN_TO_WATCH
+  ON_HOLD
+  DROPPED
+}
+
+enum ReportKind {
+  VIDEO_BROKEN
+  WRONG_EPISODE
+  AUDIO_NOT_SYNCED
+  SUBTITLE_NOT_SYNCED
+  INCORRECT_TIMESTAMPS
+  SOURCE_UNAVAILABLE
+  INAPPROPRIATE_CONTENT
+  SPAM
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  REJECTED
+}
+
+enum ReportTargetType {
+  EPISODE
+  ANIME
+  COMMENT
+  COMMUNITY_POST
+  COMMUNITY_COMMENT
+  USER
+}
+
+enum CommunityPostKind {
+  TEXT
+  POLL
+  TIER_LIST
+  MATCHUP
+  RECOMMENDATION
+}
+
+enum TierLevel {
+  S
+  A
+  B
+  C
+  D
+  F
+}
+
+/// Every event that can grant Mana. Amounts and daily caps live in ManaRule so
+/// an admin can retune the economy without a deploy.
+enum ManaEvent {
+  EPISODE_COMMENT
+  COMMUNITY_COMMENT
+  COMMUNITY_POST
+  RECEIVED_UPVOTE
+  POLL_VOTE
+  EPISODE_COMPLETED
+  DAILY_LOGIN
+  RATING_SUBMITTED
+  ANIME_REQUEST_APPROVED
+  ADMIN_ADJUSTMENT
+}
+
+enum RequestStatus {
+  PENDING
+  REVIEWING
+  APPROVED
+  AVAILABLE
+  REJECTED
+}
+
+enum ContactCategory {
+  GENERAL
+  TECHNICAL
+  DMCA
+  ADVERTISING
+  ACCOUNT
+  FEEDBACK
+  OTHER
+}
+
+enum ContactStatus {
+  NEW
+  OPEN
+  RESOLVED
+  CLOSED
+}
+
+enum AdType {
+  DISPLAY
+  IN_ARTICLE
+  IN_FEED
+  MULTIPLEX
+  VIDEO
+}
+
+// ============================================================================
+// USERS & AUTH
+// ============================================================================
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  email         String     @unique
+  username      String     @unique
+  /// Null for accounts created purely through Google OAuth.
+  passwordHash  String?
+  displayName   String?
+  avatarUrl     String?
+  bannerUrl     String?
+  bio           String?    @db.VarChar(500)
+  role          UserRole   @default(USER)
+  status        UserStatus @default(ACTIVE)
+
+  emailVerifiedAt DateTime?
+  googleId        String?   @unique
+
+  // Gamification
+  mana   Int     @default(0)
+  rankId String? @db.Uuid
+  rank   Rank?   @relation(fields: [rankId], references: [id], onDelete: SetNull)
+
+  // Preferences
+  titlePreference   TitlePreference @default(ENGLISH)
+  preferredAudio    String?         @db.VarChar(16)
+  preferredSubtitle String?         @db.VarChar(16)
+  autoplayNext      Boolean         @default(true)
+  autoSkipIntro     Boolean         @default(false)
+
+  // Moderation
+  suspendedUntil DateTime?
+  banReason      String?
+
+  lastLoginAt   DateTime?
+  lastManaLogin DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  refreshTokens      RefreshToken[]
+  passwordResets     PasswordResetToken[]
+  emailVerifications EmailVerificationToken[]
+  watchProgress      WatchProgress[]
+  watchHistory       WatchHistory[]
+  watchlist          WatchlistEntry[]
+  favorites          Favorite[]
+  ratings            Rating[]
+  comments           Comment[]
+  commentVotes       CommentVote[]
+  reportsFiled       Report[]                @relation("ReportAuthor")
+  reportsResolved    Report[]                @relation("ReportResolver")
+  communityPosts     CommunityPost[]
+  communityComments  CommunityComment[]
+  communityVotes     CommunityVote[]
+  pollVotes          PollVote[]
+  manaTransactions   ManaTransaction[]
+  animeRequests      AnimeRequest[]
+  activityLogs       ActivityLog[]
+  animeViews         AnimeView[]
+  episodeViews       EpisodeView[]
+
+  @@index([role, status])
+  @@index([mana(sort: Desc)])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the token. The raw value never touches the database.
+  tokenHash String    @unique
+  userAgent String?
+  ipHash    String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+model Rank {
+  id           String  @id @default(uuid()) @db.Uuid
+  name         String  @unique
+  slug         String  @unique
+  description  String?
+  requiredMana Int     @unique
+  icon         String?
+  color        String? @db.VarChar(16)
+  order        Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@index([requiredMana])
+  @@map("ranks")
+}
+
+// ============================================================================
+// CATALOGUE
+// ============================================================================
+
+model Anime {
+  id             String  @id @default(uuid()) @db.Uuid
+  slug           String  @unique
+  titleEnglish   String
+  titleJapanese  String?
+  titleRomaji    String?
+  synopsis       String?
+  posterUrl      String?
+  bannerUrl      String?
+  trailerUrl     String?
+
+  type       AnimeType    @default(TV)
+  status     AnimeStatus  @default(ONGOING)
+  season     AnimeSeason?
+  releaseYear Int?
+  airStartDate DateTime?
+  airEndDate   DateTime?
+  ageRating  AgeRating?
+  source     AnimeSource? @default(ORIGINAL)
+
+  /// Average episode runtime in minutes.
+  durationMinutes Int?
+  totalEpisodes   Int?
+
+  // Denormalised counters — recomputed by the catalogue service on write.
+  subEpisodeCount Int     @default(0)
+  dubEpisodeCount Int     @default(0)
+  score           Decimal @default(0) @db.Decimal(4, 2)
+  scoreCount      Int     @default(0)
+  viewCount       Int     @default(0)
+  favoriteCount   Int     @default(0)
+  /// Rolling popularity score, refreshed by the analytics cron.
+  popularity      Int     @default(0)
+
+  isFeatured    Boolean       @default(false)
+  isTrending    Boolean       @default(false)
+  publishStatus PublishStatus @default(DRAFT)
+
+  seoTitle       String?
+  seoDescription String? @db.VarChar(320)
+
+  /// Optional external identifiers, stored for the admin's reference only.
+  /// Nothing in the application ever calls these services.
+  malId     Int?
+  anilistId Int?
+
+  studioId String? @db.Uuid
+  studio   Studio? @relation(fields: [studioId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  titles          AnimeTitle[]
+  genres          AnimeGenre[]
+  producers       AnimeProducer[]
+  seasons         Season[]
+  episodes        Episode[]
+  relationsFrom   AnimeRelation[]        @relation("RelationSource")
+  relationsTo     AnimeRelation[]        @relation("RelationTarget")
+  recommendsFrom  AnimeRecommendation[]  @relation("RecommendSource")
+  recommendsTo    AnimeRecommendation[]  @relation("RecommendTarget")
+  watchProgress   WatchProgress[]
+  watchHistory    WatchHistory[]
+  watchlistEntries WatchlistEntry[]
+  favorites       Favorite[]
+  ratings         Rating[]
+  comments        Comment[]
+  views           AnimeView[]
+  viewStats       AnimeViewStat[]
+  featuredEntries FeaturedAnime[]
+  animeRequests   AnimeRequest[]
+  pollOptions     PollOption[]
+  tierListItems   TierListItem[]
+  postAnime       CommunityPostAnime[]
+
+  @@index([publishStatus, deletedAt])
+  @@index([publishStatus, updatedAt(sort: Desc)])
+  @@index([publishStatus, createdAt(sort: Desc)])
+  @@index([publishStatus, viewCount(sort: Desc)])
+  @@index([publishStatus, score(sort: Desc)])
+  @@index([publishStatus, popularity(sort: Desc)])
+  @@index([type])
+  @@index([status])
+  @@index([releaseYear, season])
+  @@index([titleEnglish])
+  @@index([studioId])
+  @@map("anime")
+}
+
+/// Alternative/localised titles. Search hits this table as well as the
+/// denormalised columns on Anime, so synonyms are findable.
+model AnimeTitle {
+  id      String         @id @default(uuid()) @db.Uuid
+  animeId String         @db.Uuid
+  anime   Anime          @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  title   String
+  kind    AnimeTitleKind @default(SYNONYM)
+
+  @@unique([animeId, title, kind])
+  @@index([title])
+  @@map("anime_titles")
+}
+
+model Genre {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  color       String? @db.VarChar(16)
+  order       Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  anime AnimeGenre[]
+
+  @@map("genres")
+}
+
+model AnimeGenre {
+  animeId String @db.Uuid
+  genreId String @db.Uuid
+  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  genre   Genre  @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([animeId, genreId])
+  @@index([genreId])
+  @@map("anime_genres")
+}
+
+model Studio {
+  id        String  @id @default(uuid()) @db.Uuid
+  name      String  @unique
+  slug      String  @unique
+  logoUrl   String?
+  websiteUrl String?
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  anime Anime[]
+
+  @@map("studios")
+}
+
+model Producer {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @unique
+  slug String @unique
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  anime AnimeProducer[]
+
+  @@map("producers")
+}
+
+model AnimeProducer {
+  animeId    String   @db.Uuid
+  producerId String   @db.Uuid
+  anime      Anime    @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  producer   Producer @relation(fields: [producerId], references: [id], onDelete: Cascade)
+
+  @@id([animeId, producerId])
+  @@index([producerId])
+  @@map("anime_producers")
+}
+
+model AnimeRelation {
+  id             String       @id @default(uuid()) @db.Uuid
+  animeId        String       @db.Uuid
+  relatedAnimeId String       @db.Uuid
+  kind           RelationKind @default(OTHER)
+  anime          Anime        @relation("RelationSource", fields: [animeId], references: [id], onDelete: Cascade)
+  relatedAnime   Anime        @relation("RelationTarget", fields: [relatedAnimeId], references: [id], onDelete: Cascade)
+
+  @@unique([animeId, relatedAnimeId])
+  @@index([relatedAnimeId])
+  @@map("anime_relations")
+}
+
+/// Manually curated recommendations. The recommendation service falls back to
+/// genre/studio/popularity similarity when no manual rows exist.
+model AnimeRecommendation {
+  id                String @id @default(uuid()) @db.Uuid
+  animeId           String @db.Uuid
+  recommendedAnimeId String @db.Uuid
+  weight            Int    @default(0)
+  anime             Anime  @relation("RecommendSource", fields: [animeId], references: [id], onDelete: Cascade)
+  recommendedAnime  Anime  @relation("RecommendTarget", fields: [recommendedAnimeId], references: [id], onDelete: Cascade)
+
+  @@unique([animeId, recommendedAnimeId])
+  @@index([recommendedAnimeId])
+  @@map("anime_recommendations")
+}
+
+model Season {
+  id      String  @id @default(uuid()) @db.Uuid
+  animeId String  @db.Uuid
+  anime   Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  number  Int
+  title   String?
+  posterUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  episodes Episode[]
+
+  @@unique([animeId, number])
+  @@map("seasons")
+}
+
+model Episode {
+  id       String  @id @default(uuid()) @db.Uuid
+  animeId  String  @db.Uuid
+  anime    Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  seasonId String? @db.Uuid
+  season   Season? @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+
+  /// Decimal so recap/special episodes such as 7.5 are representable.
+  number       Decimal @db.Decimal(6, 1)
+  title        String?
+  description  String?
+  thumbnailUrl String?
+
+  durationSeconds Int?
+  airDate         DateTime?
+  isFiller        Boolean   @default(false)
+
+  hasSub Boolean @default(true)
+  hasDub Boolean @default(false)
+
+  /// Seconds from the start of the episode. Null = no marker configured, and
+  /// the player then hides the corresponding skip button.
+  introStart Int?
+  introEnd   Int?
+  outroStart Int?
+  outroEnd   Int?
+
+  viewCount     Int           @default(0)
+  publishStatus PublishStatus @default(DRAFT)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  mediaSources    MediaSource[]
+  audioTracks     AudioTrack[]
+  subtitleTracks  SubtitleTrack[]
+  downloadSources DownloadSource[]
+  watchProgress   WatchProgress[]
+  watchHistory    WatchHistory[]
+  comments        Comment[]
+  views           EpisodeView[]
+  viewStats       EpisodeViewStat[]
+
+  @@unique([animeId, number])
+  @@index([animeId, publishStatus])
+  @@index([publishStatus, createdAt(sort: Desc)])
+  @@index([publishStatus, airDate(sort: Desc)])
+  @@map("episodes")
+}
+
+// ============================================================================
+// MEDIA
+// ============================================================================
+
+/// One playable "server" entry for an episode, scoped to a single audio
+/// flavour. The player's Server selector lists these; the SUB/DUB selector
+/// filters them by `kind`.
+model MediaSource {
+  id        String  @id @default(uuid()) @db.Uuid
+  episodeId String  @db.Uuid
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  label    String        @default("Server 1")
+  provider MediaProvider @default(GOOGLE_DRIVE)
+  kind     MediaKind     @default(SUB)
+
+  /// BCP-47-ish tag, e.g. "ja", "en", "bn".
+  audioLanguage String @default("ja") @db.VarChar(16)
+  audioLabel    String @default("Japanese")
+
+  /// Only used by MediaProvider.HLS — the .m3u8 master playlist.
+  hlsUrl String?
+  /// Only used by MediaProvider.EXTERNAL_EMBED. Rendered in a sandboxed iframe
+  /// with the custom controls hidden, because an embed cannot be controlled.
+  embedUrl String?
+
+  priority  Int     @default(0)
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  /// Provider-specific extras (proxy overrides, headers, notes).
+  config Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants       MediaVariant[]
+  audioTracks    AudioTrack[]
+  subtitleTracks SubtitleTrack[]
+
+  @@index([episodeId, isActive, priority])
+  @@index([episodeId, kind])
+  @@map("media_sources")
+}
+
+/// A single-quality rendition of a MediaSource. For progressive providers
+/// (Drive / direct file) each quality is a physically separate file, which is
+/// what makes real quality switching possible.
+model MediaVariant {
+  id            String      @id @default(uuid()) @db.Uuid
+  mediaSourceId String      @db.Uuid
+  mediaSource   MediaSource @relation(fields: [mediaSourceId], references: [id], onDelete: Cascade)
+
+  quality VideoQuality @default(Q_720P)
+
+  /// GOOGLE_DRIVE: the Drive file ID (not a share URL — the admin form accepts
+  /// a URL and extracts the ID).
+  driveFileId String?
+  /// DIRECT_FILE / OBJECT_STORAGE: absolute or storage-relative URL.
+  directUrl String?
+
+  mimeType      String? @default("video/mp4")
+  fileSizeBytes BigInt?
+  bitrateKbps   Int?
+  width         Int?
+  height        Int?
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mediaSourceId, quality])
+  @@index([mediaSourceId, isActive])
+  @@map("media_variants")
+}
+
+/// An audio rendition.
+///
+/// Two uses:
+///  * Episode-level (episodeId set): a separate audio FILE (e.g. Japanese.m4a,
+///    English-Dub.m4a) played in sync with whatever video quality is showing.
+///    Switching language swaps only the audio element; the video keeps playing.
+///  * Source-level (mediaSourceId set): an in-manifest HLS rendition group,
+///    switched by the HLS engine.
+model AudioTrack {
+  id            String       @id @default(uuid()) @db.Uuid
+  mediaSourceId String?      @db.Uuid
+  mediaSource   MediaSource? @relation(fields: [mediaSourceId], references: [id], onDelete: Cascade)
+  episodeId     String?      @db.Uuid
+  episode       Episode?     @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  language String  @db.VarChar(16)
+  label    String
+
+  /// Where the audio file lives (episode-level tracks only).
+  provider    MediaProvider @default(GOOGLE_DRIVE)
+  driveFileId String?
+  url         String?
+  mimeType    String?       @default("audio/mp4") @db.VarChar(80)
+  codec       String?       @db.VarChar(60)
+
+  /// Matches the NAME/LANGUAGE attribute of the HLS rendition group.
+  hlsGroupId String?
+  isDefault  Boolean @default(false)
+  isActive   Boolean @default(true)
+  sortOrder  Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mediaSourceId, language])
+  @@index([episodeId, isActive, sortOrder])
+  @@map("audio_tracks")
+}
+
+/// Subtitle tracks. `mediaSourceId` null means the track applies to every
+/// source of the episode (the common case).
+model SubtitleTrack {
+  id        String  @id @default(uuid()) @db.Uuid
+  episodeId String  @db.Uuid
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  mediaSourceId String?      @db.Uuid
+  mediaSource   MediaSource? @relation(fields: [mediaSourceId], references: [id], onDelete: Cascade)
+
+  language String         @db.VarChar(16)
+  label    String
+  format   SubtitleFormat @default(VTT)
+
+  /// Either a direct URL (uploaded .vtt) or a Drive file served through the
+  /// media proxy.
+  url         String?
+  driveFileId String?
+
+  isDefault Boolean @default(false)
+  isForced  Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([episodeId, isActive])
+  @@map("subtitle_tracks")
+}
+
+/// Only rendered when the operator has configured an authorised download URL.
+model DownloadSource {
+  id        String  @id @default(uuid()) @db.Uuid
+  episodeId String  @db.Uuid
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  label     String
+  quality   VideoQuality @default(Q_720P)
+  kind      MediaKind    @default(SUB)
+  url       String
+  sizeBytes BigInt?
+  isActive  Boolean      @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([episodeId, isActive])
+  @@map("download_sources")
+}
+
+// ============================================================================
+// USER ACTIVITY
+// ============================================================================
+
+/// Resume state — one row per (user, episode), updated in place.
+model WatchProgress {
+  id        String  @id @default(uuid()) @db.Uuid
+  userId    String  @db.Uuid
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episodeId String  @db.Uuid
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  animeId   String  @db.Uuid
+  anime     Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  positionSeconds Int     @default(0)
+  durationSeconds Int?
+  percent         Int     @default(0)
+  completed       Boolean @default(false)
+
+  lastWatchedAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, episodeId])
+  @@index([userId, lastWatchedAt(sort: Desc)])
+  @@index([userId, animeId])
+  @@map("watch_progress")
+}
+
+/// Append-only activity log, used for the profile activity feed. Resume logic
+/// reads WatchProgress, not this table.
+model WatchHistory {
+  id        String  @id @default(uuid()) @db.Uuid
+  userId    String  @db.Uuid
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episodeId String  @db.Uuid
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  animeId   String  @db.Uuid
+  anime     Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  watchedAt DateTime @default(now())
+
+  @@index([userId, watchedAt(sort: Desc)])
+  @@map("watch_history")
+}
+
+model WatchlistEntry {
+  id      String @db.Uuid @id @default(uuid())
+  userId  String @db.Uuid
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  animeId String @db.Uuid
+  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  status           WatchStatus @default(PLAN_TO_WATCH)
+  progressEpisodes Int         @default(0)
+  note             String?     @db.VarChar(300)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, animeId])
+  @@index([userId, status])
+  @@index([animeId])
+  @@map("watchlist_entries")
+}
+
+model Favorite {
+  id      String @id @default(uuid()) @db.Uuid
+  userId  String @db.Uuid
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  animeId String @db.Uuid
+  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, animeId])
+  @@index([animeId])
+  @@map("favorites")
+}
+
+model Rating {
+  id      String @id @default(uuid()) @db.Uuid
+  userId  String @db.Uuid
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  animeId String @db.Uuid
+  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  /// 1–10 inclusive, validated in the DTO layer.
+  score Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, animeId])
+  @@index([animeId])
+  @@map("ratings")
+}
+
+// ============================================================================
+// COMMENTS
+// ============================================================================
+
+model Comment {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Exactly one of animeId / episodeId is set — enforced in the service.
+  animeId   String?  @db.Uuid
+  anime     Anime?   @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  episodeId String?  @db.Uuid
+  episode   Episode? @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  parentId String?   @db.Uuid
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[] @relation("CommentReplies")
+
+  body String @db.VarChar(2000)
+
+  upvoteCount   Int @default(0)
+  downvoteCount Int @default(0)
+  replyCount    Int @default(0)
+
+  isSpoiler Boolean @default(false)
+  isEdited  Boolean @default(false)
+  isDeleted Boolean @default(false)
+  deletedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  votes CommentVote[]
+
+  @@index([animeId, isDeleted, createdAt(sort: Desc)])
+  @@index([episodeId, isDeleted, createdAt(sort: Desc)])
+  @@index([episodeId, isDeleted, upvoteCount(sort: Desc)])
+  @@index([parentId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("comments")
+}
+
+model CommentVote {
+  id        String  @id @default(uuid()) @db.Uuid
+  commentId String  @db.Uuid
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String  @db.Uuid
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1 = upvote, -1 = downvote.
+  value Int
+
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+  @@map("comment_votes")
+}
+
+// ============================================================================
+// REPORTS
+// ============================================================================
+
+model Report {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String? @db.Uuid
+  user   User?   @relation("ReportAuthor", fields: [userId], references: [id], onDelete: SetNull)
+
+  targetType ReportTargetType
+  /// Polymorphic — deliberately not a foreign key so a report survives the
+  /// deletion of the content it describes.
+  targetId String @db.Uuid
+
+  kind    ReportKind   @default(OTHER)
+  status  ReportStatus @default(PENDING)
+  message String?      @db.VarChar(1000)
+
+  /// Free-form snapshot of the reported context (episode number, source label,
+  /// quality, user agent) so a moderator can reproduce the issue.
+  context Json?
+
+  adminNote    String?
+  resolvedById String?   @db.Uuid
+  resolvedBy   User?     @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+  @@index([kind])
+  @@map("reports")
+}
+
+// ============================================================================
+// ANALYTICS
+// ============================================================================
+
+model AnimeView {
+  id      String @id @default(uuid()) @db.Uuid
+  animeId String @db.Uuid
+  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  userId  String? @db.Uuid
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// Hashed visitor fingerprint — used only to deduplicate views within the
+  /// throttle window. No raw IP is ever stored.
+  visitorHash String  @db.VarChar(64)
+  referrer    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animeId, createdAt])
+  @@index([visitorHash, animeId, createdAt])
+  @@map("anime_views")
+}
+
+model EpisodeView {
+  id        String  @id @default(uuid()) @db.Uuid
+  episodeId String  @db.Uuid
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  userId    String? @db.Uuid
+  user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  visitorHash String @db.VarChar(64)
+
+  createdAt DateTime @default(now())
+
+  @@index([episodeId, createdAt])
+  @@index([visitorHash, episodeId, createdAt])
+  @@map("episode_views")
+}
+
+/// Daily rollups powering Trending Day/Week/Month without scanning raw views.
+model AnimeViewStat {
+  id      String   @id @default(uuid()) @db.Uuid
+  animeId String   @db.Uuid
+  anime   Anime    @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  day     DateTime @db.Date
+  views   Int      @default(0)
+
+  @@unique([animeId, day])
+  @@index([day, views(sort: Desc)])
+  @@map("anime_view_stats")
+}
+
+model EpisodeViewStat {
+  id        String   @id @default(uuid()) @db.Uuid
+  episodeId String   @db.Uuid
+  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  day       DateTime @db.Date
+  views     Int      @default(0)
+
+  @@unique([episodeId, day])
+  @@index([day, views(sort: Desc)])
+  @@map("episode_view_stats")
+}
+
+// ============================================================================
+// COMMUNITY
+// ============================================================================
+
+model CommunityCategory {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  color       String? @db.VarChar(16)
+  icon        String?
+  order       Int     @default(0)
+  isActive    Boolean @default(true)
+  /// Only staff may post here (used by the "Updates" category).
+  staffOnly   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts CommunityPost[]
+
+  @@map("community_categories")
+}
+
+model CommunityPost {
+  id         String            @id @default(uuid()) @db.Uuid
+  userId     String            @db.Uuid
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId String            @db.Uuid
+  category   CommunityCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  title String @db.VarChar(200)
+  slug  String @unique
+  body  String @db.VarChar(20000)
+  kind  CommunityPostKind @default(TEXT)
+
+  upvoteCount   Int @default(0)
+  downvoteCount Int @default(0)
+  commentCount  Int @default(0)
+  viewCount     Int @default(0)
+
+  isPinned  Boolean @default(false)
+  isLocked  Boolean @default(false)
+  isDeleted Boolean @default(false)
+  isEdited  Boolean @default(false)
+  deletedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments      CommunityComment[]
+  votes         CommunityVote[]
+  poll          Poll?
+  tierListItems TierListItem[]
+  animeRefs     CommunityPostAnime[]
+
+  @@index([categoryId, isDeleted, createdAt(sort: Desc)])
+  @@index([isDeleted, isPinned, createdAt(sort: Desc)])
+  @@index([isDeleted, upvoteCount(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("community_posts")
+}
+
+model CommunityComment {
+  id     String        @id @default(uuid()) @db.Uuid
+  postId String        @db.Uuid
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId String        @db.Uuid
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  parentId String?            @db.Uuid
+  parent   CommunityComment?  @relation("CommunityReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  CommunityComment[] @relation("CommunityReplies")
+
+  body String @db.VarChar(5000)
+
+  upvoteCount Int @default(0)
+  replyCount  Int @default(0)
+
+  isEdited  Boolean @default(false)
+  isDeleted Boolean @default(false)
+  deletedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  votes CommunityVote[]
+
+  @@index([postId, isDeleted, createdAt])
+  @@index([parentId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("community_comments")
+}
+
+model CommunityVote {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  postId    String?           @db.Uuid
+  post      CommunityPost?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId String?           @db.Uuid
+  comment   CommunityComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  value Int
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@map("community_votes")
+}
+
+/// Links a post to the anime it is about — powers Recommendation and Matchup
+/// post kinds, and lets the UI render anime cards inside a post.
+model CommunityPostAnime {
+  id      String        @id @default(uuid()) @db.Uuid
+  postId  String        @db.Uuid
+  post    CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  animeId String        @db.Uuid
+  anime   Anime         @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  note    String?       @db.VarChar(500)
+  order   Int           @default(0)
+
+  @@unique([postId, animeId])
+  @@map("community_post_anime")
+}
+
+// ============================================================================
+// POLLS  (also backs MATCHUP posts, which are polls with exactly two options)
+// ============================================================================
+
+model Poll {
+  id     String        @id @default(uuid()) @db.Uuid
+  postId String        @unique @db.Uuid
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  question      String    @db.VarChar(300)
+  allowMultiple Boolean   @default(false)
+  totalVotes    Int       @default(0)
+  closesAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  options PollOption[]
+  votes   PollVote[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id     String @id @default(uuid()) @db.Uuid
+  pollId String @db.Uuid
+  poll   Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  text      String  @db.VarChar(200)
+  imageUrl  String?
+  order     Int     @default(0)
+  voteCount Int     @default(0)
+
+  /// Optional link to a catalogue entry, used by matchup/tier-list style polls.
+  animeId String? @db.Uuid
+  anime   Anime?  @relation(fields: [animeId], references: [id], onDelete: SetNull)
+
+  votes PollVote[]
+
+  @@index([pollId, order])
+  @@map("poll_options")
+}
+
+model PollVote {
+  id           String     @id @default(uuid()) @db.Uuid
+  pollId       String     @db.Uuid
+  poll         Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  pollOptionId String     @db.Uuid
+  pollOption   PollOption @relation(fields: [pollOptionId], references: [id], onDelete: Cascade)
+  userId       String     @db.Uuid
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([pollOptionId, userId])
+  @@index([pollId, userId])
+  @@map("poll_votes")
+}
+
+model TierListItem {
+  id     String        @id @default(uuid()) @db.Uuid
+  postId String        @db.Uuid
+  post   CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  tier  TierLevel
+  label String    @db.VarChar(200)
+  order Int       @default(0)
+
+  animeId String? @db.Uuid
+  anime   Anime?  @relation(fields: [animeId], references: [id], onDelete: SetNull)
+
+  @@index([postId, tier, order])
+  @@map("tier_list_items")
+}
+
+// ============================================================================
+// GAMIFICATION
+// ============================================================================
+
+/// Admin-tunable economy. `dailyLimit` 0 means unlimited.
+model ManaRule {
+  id          String    @id @default(uuid()) @db.Uuid
+  event       ManaEvent @unique
+  amount      Int
+  dailyLimit  Int       @default(0)
+  description String?
+  isActive    Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("mana_rules")
+}
+
+model ManaTransaction {
+  id     String    @id @default(uuid()) @db.Uuid
+  userId String    @db.Uuid
+  user   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event  ManaEvent
+  amount Int
+  reason String?
+
+  /// Idempotency key — prevents awarding the same action twice
+  /// (e.g. "EPISODE_COMPLETED:<episodeId>").
+  dedupeKey String? @db.VarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([event, createdAt])
+  @@map("mana_transactions")
+}
+
+// ============================================================================
+// REQUESTS & SUPPORT
+// ============================================================================
+
+model AnimeRequest {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String? @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  title         String  @db.VarChar(250)
+  titleJapanese String? @db.VarChar(250)
+  malUrl        String?
+  anilistUrl    String?
+  message       String? @db.VarChar(1000)
+
+  status    RequestStatus @default(PENDING)
+  adminNote String?
+
+  /// Set when the request has been fulfilled, linking to the published entry.
+  fulfilledAnimeId String? @db.Uuid
+  fulfilledAnime   Anime?  @relation(fields: [fulfilledAnimeId], references: [id], onDelete: SetNull)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("anime_requests")
+}
+
+model ContactMessage {
+  id       String          @id @default(uuid()) @db.Uuid
+  name     String          @db.VarChar(120)
+  email    String          @db.VarChar(200)
+  subject  String          @db.VarChar(200)
+  category ContactCategory @default(GENERAL)
+  message  String          @db.VarChar(5000)
+
+  status    ContactStatus @default(NEW)
+  adminNote String?
+  ipHash    String?       @db.VarChar(64)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("contact_messages")
+}
+
+// ============================================================================
+// SITE CONFIGURATION
+// ============================================================================
+
+/// Key/value configuration editable from the admin panel. `isPublic` rows are
+/// exposed to the frontend through GET /api/settings/public.
+model SiteSetting {
+  key         String  @id
+  value       Json
+  group       String  @default("general")
+  label       String?
+  description String?
+  isPublic    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([group])
+  @@map("site_settings")
+}
+
+/// One configurable advertising slot. Display slots carry AdSense identifiers;
+/// the single VIDEO slot carries the IMA/VAST configuration in `config`.
+model AdPlacement {
+  id   String @id @default(uuid()) @db.Uuid
+  key  String @unique
+  name String
+  description String?
+
+  type     AdType  @default(DISPLAY)
+  adClient String?
+  adSlot   String?
+  format   String? @default("auto")
+  fullWidthResponsive Boolean @default(true)
+
+  isEnabled Boolean @default(false)
+  order     Int     @default(0)
+
+  /// VIDEO placements: { vastTagUrl, preRoll, midRoll, postRoll,
+  ///   midRollIntervalSeconds, midRollCuePoints, frequencyCapPerHour }
+  config Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type, isEnabled])
+  @@map("ad_placements")
+}
+
+model FeaturedAnime {
+  id      String @id @default(uuid()) @db.Uuid
+  animeId String @db.Uuid
+  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+
+  headline    String?
+  subtitle    String?
+  ctaLabel    String? @default("Watch Now")
+  backdropUrl String?
+  order       Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([animeId])
+  @@index([isActive, order])
+  @@map("featured_anime")
+}
+
+/// Audit trail for sensitive admin operations.
+model ActivityLog {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String? @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipHash     String? @db.VarChar(64)
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@index([createdAt(sort: Desc)])
+  @@map("activity_logs")
+}

@@ -1,0 +1,337 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { User, UserRole, UserStatus } from '@prisma/client';
+import bcrypt from 'bcrypt';
+import { randomToken, sha256 } from 'src/common/utils/crypto.util';
+import { AppConfigService } from 'src/config/app-config.service';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
+import { ManaService } from '../mana/mana.service';
+import { ChangePasswordDto, LoginDto, RegisterDto } from './dto/auth.dto';
+import { TokenPair, TokenService } from './token.service';
+
+export interface SessionContext {
+  userAgent?: string;
+  ipHash?: string;
+}
+
+export interface AuthResult extends TokenPair {
+  user: PublicUser;
+}
+
+export interface PublicUser {
+  id: string;
+  email: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  role: UserRole;
+  status: UserStatus;
+  mana: number;
+  titlePreference: User['titlePreference'];
+  emailVerified: boolean;
+  createdAt: Date;
+}
+
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tokens: TokenService,
+    private readonly mail: MailService,
+    private readonly mana: ManaService,
+    private readonly config: AppConfigService,
+  ) {}
+
+  async register(dto: RegisterDto, ctx: SessionContext = {}): Promise<AuthResult> {
+    const [emailTaken, usernameTaken] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email: dto.email }, select: { id: true } }),
+      this.prisma.user.findUnique({ where: { username: dto.username }, select: { id: true } }),
+    ]);
+    if (emailTaken) throw new ConflictException('An account with this email already exists');
+    if (usernameTaken) throw new ConflictException('That username is already taken');
+
+    const passwordHash = await bcrypt.hash(dto.password, this.config.values.bcryptRounds);
+    const startingRank = await this.prisma.rank.findFirst({ orderBy: { requiredMana: 'asc' } });
+
+    const user = await this.prisma.user.create({
+      data: {
+        email: dto.email,
+        username: dto.username,
+        displayName: dto.username,
+        passwordHash,
+        rankId: startingRank?.id ?? null,
+        // Email verification is advisory: an unverified account can still
+        // browse and watch, it simply carries the PENDING flag until confirmed.
+        status: UserStatus.ACTIVE,
+      },
+    });
+
+    await this.dispatchVerificationEmail(user);
+
+    const pair = await this.tokens.issuePair(user, ctx);
+    return { ...pair, user: toPublicUser(user) };
+  }
+
+  async login(dto: LoginDto, ctx: SessionContext = {}): Promise<AuthResult> {
+    const identifier = dto.identifier.toLowerCase();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        deletedAt: null,
+        OR: [{ email: identifier }, { username: dto.identifier }],
+      },
+    });
+
+    // Compare against a dummy hash when the account is missing so that a
+    // non-existent user and a wrong password take the same amount of time.
+    const hash = user?.passwordHash ?? DUMMY_HASH;
+    const valid = await bcrypt.compare(dto.password, hash);
+
+    if (!user || !valid) {
+      throw new UnauthorizedException('Incorrect email/username or password');
+    }
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('This account uses Google sign-in. Continue with Google instead.');
+    }
+    this.assertUsable(user);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+    await this.mana.awardDailyLogin(user.id);
+
+    const pair = await this.tokens.issuePair(user, { ...ctx, rememberMe: dto.rememberMe });
+    return { ...pair, user: toPublicUser(user) };
+  }
+
+  /**
+   * Google sign-in / sign-up.
+   *
+   *  1. A Google account already linked to a user -> sign in as that user.
+   *  2. Otherwise, a user with the same email exists -> link ONLY if Google
+   *     states the email is verified. An unverified Google email could belong to
+   *     anyone, so linking on it would hand them the existing account.
+   *  3. Otherwise -> create a new account with role USER.
+   *
+   * The role is never changed here: a Google login can only ever reach the
+   * privileges the matching database account already has.
+   */
+  async loginWithGoogle(
+    profile: { googleId: string; email: string; emailVerified: boolean; displayName?: string; avatarUrl?: string },
+    ctx: SessionContext = {},
+  ): Promise<AuthResult> {
+    let user = await this.prisma.user.findUnique({ where: { googleId: profile.googleId } });
+
+    if (!user) {
+      const byEmail = await this.prisma.user.findUnique({ where: { email: profile.email } });
+
+      if (byEmail) {
+        if (!profile.emailVerified) {
+          throw new UnauthorizedException(
+            'An account with this email already exists. Sign in with your password instead.',
+          );
+        }
+        if (byEmail.googleId && byEmail.googleId !== profile.googleId) {
+          throw new UnauthorizedException('This email is already linked to a different Google account.');
+        }
+        this.assertUsable(byEmail);
+        user = await this.prisma.user.update({
+          where: { id: byEmail.id },
+          data: {
+            googleId: profile.googleId,
+            emailVerifiedAt: byEmail.emailVerifiedAt ?? new Date(),
+            avatarUrl: byEmail.avatarUrl ?? profile.avatarUrl ?? null,
+          },
+        });
+      } else {
+        if (!profile.emailVerified) {
+          throw new UnauthorizedException('Your Google email address is not verified.');
+        }
+        const startingRank = await this.prisma.rank.findFirst({ orderBy: { requiredMana: 'asc' } });
+        user = await this.prisma.user.create({
+          data: {
+            email: profile.email,
+            username: await this.deriveUsername(profile.email),
+            displayName: profile.displayName ?? null,
+            avatarUrl: profile.avatarUrl ?? null,
+            googleId: profile.googleId,
+            emailVerifiedAt: new Date(),
+            role: UserRole.USER,
+            rankId: startingRank?.id ?? null,
+          },
+        });
+      }
+    }
+
+    this.assertUsable(user);
+    await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    await this.mana.awardDailyLogin(user.id);
+
+    const pair = await this.tokens.issuePair(user, { ...ctx, rememberMe: true });
+    return { ...pair, user: toPublicUser(user) };
+  }
+
+  async refresh(refreshToken: string, ctx: SessionContext = {}): Promise<AuthResult> {
+    const pair = await this.tokens.rotate(refreshToken, ctx);
+    const payload = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash: sha256(pair.refreshToken) },
+      include: { user: true },
+    });
+    if (!payload) throw new UnauthorizedException('Could not refresh session');
+    return { ...pair, user: toPublicUser(payload.user) };
+  }
+
+  async logout(refreshToken?: string): Promise<void> {
+    if (refreshToken) await this.tokens.revoke(refreshToken);
+  }
+
+  async logoutEverywhere(userId: string): Promise<void> {
+    await this.tokens.revokeAllForUser(userId);
+  }
+
+  /**
+   * Always resolves successfully, whether or not the address exists — otherwise
+   * the endpoint becomes an account-enumeration oracle.
+   */
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.deletedAt) {
+      this.logger.debug(`Password reset requested for unknown address ${email}`);
+      return;
+    }
+
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const token = randomToken(48);
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: sha256(token),
+        expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+      },
+    });
+
+    const url = `${this.config.values.siteUrl}/auth/reset-password?token=${token}`;
+    await this.mail.sendPasswordReset(user.email, user.displayName ?? user.username, url);
+  }
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    const record = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash: sha256(token) },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('This reset link is invalid or has expired');
+    }
+
+    const passwordHash = await bcrypt.hash(password, this.config.values.bcryptRounds);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      this.prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.passwordHash) {
+      throw new BadRequestException('This account has no password set');
+    }
+    const matches = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!matches) throw new BadRequestException('Your current password is incorrect');
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, this.config.values.bcryptRounds);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    await this.tokens.revokeAllForUser(userId);
+  }
+
+  async verifyEmail(token: string): Promise<void> {
+    const record = await this.prisma.emailVerificationToken.findUnique({
+      where: { tokenHash: sha256(token) },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('This confirmation link is invalid or has expired');
+    }
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: record.userId },
+        data: { emailVerifiedAt: new Date(), status: UserStatus.ACTIVE },
+      }),
+      this.prisma.emailVerificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    ]);
+  }
+
+  async resendVerification(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.emailVerifiedAt) return;
+    await this.dispatchVerificationEmail(user);
+  }
+
+  private async dispatchVerificationEmail(user: User): Promise<void> {
+    const token = randomToken(32);
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: sha256(token),
+        expiresAt: new Date(Date.now() + EMAIL_VERIFY_TTL_MS),
+      },
+    });
+    const url = `${this.config.values.siteUrl}/auth/verify-email?token=${token}`;
+    await this.mail.sendEmailVerification(user.email, user.displayName ?? user.username, url);
+  }
+
+  private assertUsable(user: User): void {
+    if (user.deletedAt) throw new UnauthorizedException('This account has been deleted');
+    if (user.status === UserStatus.BANNED) {
+      throw new UnauthorizedException(user.banReason ?? 'This account has been banned');
+    }
+    if (user.status === UserStatus.SUSPENDED && user.suspendedUntil && user.suspendedUntil > new Date()) {
+      throw new UnauthorizedException(`This account is suspended until ${user.suspendedUntil.toDateString()}`);
+    }
+  }
+
+  private async deriveUsername(email: string): Promise<string> {
+    const base = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'user';
+    for (let i = 0; i < 20; i += 1) {
+      const candidate = i === 0 ? base : `${base}${i}`;
+      const clash = await this.prisma.user.findUnique({ where: { username: candidate }, select: { id: true } });
+      if (!clash) return candidate;
+    }
+    return `${base}${Date.now().toString(36)}`;
+  }
+}
+
+export function toPublicUser(user: User): PublicUser {
+  return {
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    role: user.role,
+    status: user.status,
+    mana: user.mana,
+    titlePreference: user.titlePreference,
+    emailVerified: user.emailVerifiedAt !== null,
+    createdAt: user.createdAt,
+  };
+}
+
+/** A real bcrypt hash of a value nobody knows, used purely for timing parity. */
+const DUMMY_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';

@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment — NEVER commit real secrets
+.env
+.env.*
+!.env.example
+!.env.docker.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Credentials (Google service accounts, OAuth clients, keys)
+*.pem
+*.key
+*.p12
+*-service-account*.json
+credentials.json
+client_secret*.json
+secrets/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# Runtime / storage
+storage/uploads/*
+!storage/uploads/.gitkeep
+# Patterns containing a slash are anchored to this file's directory, so the
+# rule above does NOT reach backend/. Uploaded artwork is runtime data and must
+# never be committed — but the demo media IS source: the backend Dockerfile
+# copies it into the image so a fresh deployment has something to play.
+backend/storage/uploads/*
+!backend/storage/uploads/demo/
+backups/*.sql
+backups/*.dump
+
+# Personal notes, not part of the project
+Drive link.txt
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Docker local volumes
+docker/volumes/
+
+# Self-contained development database (scripts/setup-dev-db.ps1)
+.dev-db/
+
+# Never commit a credential dropped in the project root by mistake.
+/*.json
