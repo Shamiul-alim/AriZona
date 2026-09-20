@@ -3,7 +3,16 @@ import { apiFetch, qs } from '@/lib/api';
 import { SITE_URL } from '@/lib/config';
 import type { AnimeCard, CommunityPostSummary, GenreRef, Paginated } from '@/lib/types';
 
-export const revalidate = 3600;
+/**
+ * Generated on request rather than at build time.
+ *
+ * With `revalidate` this was prerendered during the build, which made a
+ * successful deployment depend on the API being awake — on a free tier that
+ * spins down, the first call can take longer than the platform's per-route
+ * build budget and the whole deployment fails. Crawlers fetch a sitemap
+ * rarely, so generating it on demand costs nothing and cannot break a deploy.
+ */
+export const dynamic = 'force-dynamic';
 
 /**
  * Sitemap covering the static pages, every published title and its episode

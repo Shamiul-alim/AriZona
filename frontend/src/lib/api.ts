@@ -23,6 +23,16 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   tags?: string[];
 }
 
+/**
+ * How long any single API call may take before it is aborted. Long enough for
+ * an ordinary slow response, short enough that a sleeping backend fails fast
+ * and fallbacks render instead of the platform killing the request.
+ */
+const API_TIMEOUT_MS = (() => {
+  const configured = Number(process.env.API_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 20_000;
+})();
+
 function extractMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object' && 'message' in body) {
     const message = (body as { message: unknown }).message;
@@ -53,6 +63,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     init.next = { ...(revalidate !== undefined ? { revalidate } : {}), ...(tags ? { tags } : {}) };
   } else if (!rest.cache) {
     init.cache = 'no-store';
+  }
+
+  // A hosted API that has spun down (every free tier does) accepts the
+  // connection and then stays silent, so a fetch with no timeout hangs
+  // indefinitely: during a build the platform kills the whole route instead of
+  // letting the caller's fallback run, and at runtime the request just stalls.
+  // A timeout turns both cases into an ordinary error that the existing
+  // .catch()/safe() fallbacks already handle.
+  if (!init.signal && API_TIMEOUT_MS > 0) {
+    init.signal = AbortSignal.timeout(API_TIMEOUT_MS);
   }
 
   const response = await fetch(`${apiBase()}${path}`, init);
