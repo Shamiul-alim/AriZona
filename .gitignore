@@ -57,6 +57,9 @@ backups/*.dump
 # Personal notes, not part of the project
 Drive link.txt
 
+# Generated production credentials — never commit
+*.local.txt
+
 # OS / editor
 .DS_Store
 Thumbs.db
