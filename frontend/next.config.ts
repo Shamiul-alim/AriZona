@@ -50,6 +50,31 @@ function remoteHosts(): Array<{ protocol: 'http' | 'https'; hostname: string; po
   return hosts;
 }
 
+/**
+ * Origin of the API service, for the same-origin `/api/*` proxy below.
+ *
+ * Accepts several variables because they all describe the same thing, and a
+ * deployment that sets only the one server-rendering needs would otherwise
+ * silently ship without the proxy: `/api/*` would fall through to the app and
+ * return its 404 page instead of reaching the backend. Any path (`/api`) is
+ * discarded — only the origin is used.
+ */
+function backendOrigin(): string | null {
+  for (const raw of [process.env.BACKEND_ORIGIN, process.env.INTERNAL_API_URL, process.env.NEXT_PUBLIC_API_URL]) {
+    const value = raw?.trim();
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      // A relative value such as "/api" is not an origin; skip it.
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+      return url.origin;
+    } catch {
+      // Not a URL (relative path, typo) — try the next candidate.
+    }
+  }
+  return null;
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -91,9 +116,9 @@ const nextConfig: NextConfig = {
    * backend origin, so streams never take an extra hop through Vercel.
    */
   async rewrites() {
-    const backendOrigin = process.env.BACKEND_ORIGIN?.replace(/\/$/, '');
-    if (!backendOrigin) return [];
-    return [{ source: '/api/:path*', destination: `${backendOrigin}/api/:path*` }];
+    const origin = backendOrigin();
+    if (!origin) return [];
+    return [{ source: '/api/:path*', destination: `${origin}/api/:path*` }];
   },
 
   async headers() {
