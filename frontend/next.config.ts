@@ -18,6 +18,13 @@ function remoteHosts(): Array<{ protocol: 'http' | 'https'; hostname: string; po
   for (const candidate of candidates) {
     try {
       const url = new URL(candidate);
+      // Only real web origins are valid image hosts. Without this check a
+      // relative value like "/api" (which is what NEXT_PUBLIC_API_URL is set to
+      // for same-origin hosting) can still parse on some platforms — Windows
+      // shells rewrite it to "C:/.../api", which URL() reads as protocol "c:"
+      // with an empty hostname. Next then rejects the whole config and the
+      // production build fails.
+      if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) continue;
       const key = `${url.protocol}//${url.host}`;
       if (seen.has(key)) continue;
       seen.add(key);

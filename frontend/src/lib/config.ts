@@ -18,7 +18,41 @@ export function apiBase(): string {
 }
 
 export const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME ?? 'AniZora';
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+/**
+ * Absolute public origin, used for metadataBase, canonical links and Open
+ * Graph tags. Guaranteed to be a valid absolute URL.
+ *
+ * `??` is not enough here: an environment variable that exists but is EMPTY is
+ * a string, so it slips past the nullish check and produces `new URL('')`,
+ * which throws ERR_INVALID_URL and fails the production build. Hosts create
+ * empty variables easily, so every candidate is trimmed and validated.
+ *
+ * Vercel injects VERCEL_URL (the deployment host, without a scheme)
+ * automatically, so a deployment works without anyone hardcoding its URL.
+ */
+function resolveSiteUrl(): string {
+  const candidates = [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.NEXT_PUBLIC_VERCEL_URL,
+    process.env.VERCEL_URL,
+  ];
+
+  for (const raw of candidates) {
+    const value = raw?.trim();
+    if (!value) continue;
+    // VERCEL_URL has no scheme; everything else usually does.
+    const absolute = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    try {
+      return new URL(absolute).origin;
+    } catch {
+      // Malformed value: try the next candidate rather than failing the build.
+    }
+  }
+
+  return 'http://localhost:3000';
+}
+
+export const SITE_URL = resolveSiteUrl();
 export const SITE_TAGLINE = 'Stream anime in stunning quality';
 
 export const ADS = {
