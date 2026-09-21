@@ -50,6 +50,7 @@ export default async function GenrePage({
 
   const results = await apiFetch<Paginated<AnimeCard>>(
     `/anime${qs({ genres: slug, page, limit: 28, sort: 'updated' })}`,
+    { revalidate: 300 },
   ).catch(() => ({
     data: [],
     meta: { page: 1, limit: 28, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },

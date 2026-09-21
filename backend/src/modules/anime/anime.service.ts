@@ -134,10 +134,23 @@ export class AnimeService {
   }
 
   async featured() {
+    // Card fields plus the three extras the hero actually renders. The detail
+    // include also pulled producers, alternative titles and related titles —
+    // none of which appear in the hero, and each cost its own round trip to a
+    // database in another region.
     const rows = await this.prisma.featuredAnime.findMany({
       where: { isActive: true, anime: PUBLISHED },
       orderBy: { order: 'asc' },
-      include: { anime: { include: animeDetailInclude } },
+      include: {
+        anime: {
+          select: {
+            ...animeCardSelect,
+            synopsis: true,
+            bannerUrl: true,
+            studio: { select: { name: true } },
+          },
+        },
+      },
       take: 8,
     });
 

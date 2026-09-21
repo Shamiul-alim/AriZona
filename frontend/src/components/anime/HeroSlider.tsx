@@ -2,17 +2,33 @@
 
 import { SmartImage as Image } from '@/components/ui/SmartImage';
 import Link from 'next/link';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useCallback, useEffect, useState } from 'react';
 import type { FeaturedEntry } from '@/lib/types';
 import { cn, formatDuration, statusLabel, typeLabel } from '@/lib/utils';
 
 const ROTATE_MS = 8000;
 
+/**
+ * Honours the OS "reduce motion" setting without an animation library.
+ * The slider used to pull this from framer-motion, which cost the homepage a
+ * large client bundle for two crossfades that CSS does natively.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduced(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return reduced;
+}
+
 export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePrefersReducedMotion();
 
   const go = useCallback(
     (next: number) => {
@@ -32,7 +48,6 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
 
   const entry = entries[index];
   const anime = entry.anime;
-  const backdrop = entry.backdropUrl ?? anime.bannerUrl ?? anime.posterUrl;
 
   return (
     <section
@@ -42,42 +57,39 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
       aria-roledescription="carousel"
       aria-label="Featured anime"
     >
-      <AnimatePresence mode="sync">
-        <motion.div
-          key={entry.id}
-          initial={{ opacity: 0, scale: reduceMotion ? 1 : 1.06 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 1.1, ease: [0.22, 1, 0.36, 1] }}
-          className="absolute inset-0"
-        >
-          {backdrop ? (
+      {/* Every backdrop is layered and crossfaded with a CSS transition, which
+          keeps the previous slide visible while the next fades in — the same
+          effect the animation library provided. */}
+      {entries.map((item, i) => {
+        const src = item.backdropUrl ?? item.anime.bannerUrl ?? item.anime.posterUrl;
+        if (!src) return null;
+        return (
+          <div
+            key={item.id}
+            aria-hidden={i !== index}
+            className={cn(
+              'absolute inset-0 transition-[opacity,transform] duration-[1100ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+              i === index ? 'scale-100 opacity-100' : 'scale-[1.06] opacity-0',
+            )}
+          >
             <Image
-              src={backdrop}
+              src={src}
               alt=""
               fill
-              priority
+              priority={i === 0}
               sizes="100vw"
               className="object-cover object-center"
             />
-          ) : null}
-        </motion.div>
-      </AnimatePresence>
+          </div>
+        );
+      })}
 
       {/* Scrims: vertical for text legibility, horizontal to blend into the page. */}
       <div className="absolute inset-0 bg-gradient-to-t from-void via-void/70 to-void/20" />
       <div className="absolute inset-0 bg-gradient-to-r from-void via-void/55 to-transparent" />
 
       <div className="relative mx-auto flex h-full max-w-[1600px] items-end px-4 pb-14 md:px-6 md:pb-16">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={entry.id}
-            initial={{ opacity: 0, y: reduceMotion ? 0 : 22 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: reduceMotion ? 0 : -14 }}
-            transition={{ duration: reduceMotion ? 0 : 0.55, ease: [0.22, 1, 0.36, 1] }}
-            className="flex max-w-2xl items-end gap-5"
-          >
+        <div key={entry.id} className="animate-hero-rise flex max-w-2xl items-end gap-5">
             {anime.posterUrl ? (
               <div className="relative hidden aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-xl shadow-lift ring-1 ring-white/10 md:block lg:w-40">
                 <Image src={anime.posterUrl} alt="" fill sizes="160px" className="object-cover" />
@@ -149,8 +161,7 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
                 </Link>
               </div>
             </div>
-          </motion.div>
-        </AnimatePresence>
+        </div>
       </div>
 
       {/* Pagination */}

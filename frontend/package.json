@@ -15,7 +15,6 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
     "clsx": "^2.1.1",
-    "framer-motion": "^12.23.22",
     "hls.js": "^1.6.13",
     "next": "15.5.9",
     "react": "19.1.1",

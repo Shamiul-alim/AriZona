@@ -21,6 +21,11 @@
 
 generator client {
   provider = "prisma-client-js"
+  // Loads relations with a LATERAL JOIN instead of one extra round trip per
+  // relation. The API server and the database are in different regions, so a
+  // round trip costs ~300ms: an endpoint including five relations spent well
+  // over a second purely waiting on the network.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

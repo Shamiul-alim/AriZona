@@ -75,7 +75,7 @@ export default async function BrowsePage({ searchParams }: { searchParams: Promi
   const page = Number(query.page ?? 1);
 
   const [results, years] = await Promise.all([
-    apiFetch<Paginated<AnimeCard>>(`/anime${qs({ ...query, limit: query.limit ?? 28 })}`).catch(() => ({
+    apiFetch<Paginated<AnimeCard>>(`/anime${qs({ ...query, limit: query.limit ?? 28 })}`, { revalidate: 60 }).catch(() => ({
       data: [],
       meta: { page: 1, limit: 28, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },
     })),

@@ -49,15 +49,25 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function AnimeDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const anime = await apiFetchOrNull<AnimeDetail>(`/anime/${slug}`);
+  // These responses are the same for every visitor — server rendering is
+  // anonymous, so no per-user state is in them. Without a revalidate hint
+  // apiFetch falls back to `no-store`, which also forces this whole route to
+  // render dynamically and defeats the `revalidate` declared above: every
+  // visit paid three full round trips to a database on the other side of the
+  // world. Per-user state is fetched on the client after hydration.
+  const anime = await apiFetchOrNull<AnimeDetail>(`/anime/${slug}`, { revalidate: 120 });
   if (!anime) notFound();
 
   const [episodes, recommendations] = await Promise.all([
-    apiFetch<Paginated<EpisodeSummary>>(`/anime/${slug}/episodes${qs({ limit: 500 })}`).catch(() => ({
+    apiFetch<Paginated<EpisodeSummary>>(`/anime/${slug}/episodes${qs({ limit: 500 })}`, {
+      revalidate: 120,
+    }).catch(() => ({
       data: [] as EpisodeSummary[],
       meta: { page: 1, limit: 0, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },
     })),
-    apiFetch<AnimeCardType[]>(`/anime/${slug}/recommendations${qs({ limit: 14 })}`).catch(() => []),
+    apiFetch<AnimeCardType[]>(`/anime/${slug}/recommendations${qs({ limit: 14 })}`, {
+      revalidate: 300,
+    }).catch(() => []),
   ]);
 
   const firstEpisode = episodes.data[0];

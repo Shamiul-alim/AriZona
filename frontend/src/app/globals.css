@@ -209,6 +209,23 @@
   animation: fade-up 0.5s var(--ease-out-soft) both;
 }
 
+/* Hero copy entrance. Matches the motion the slider used to run in JavaScript,
+   so the look is unchanged while the animation library leaves the bundle. */
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-hero-rise {
+  animation: hero-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-hero-rise {
+    animation: none;
+  }
+}
+
 .animate-float {
   animation: float-slow 6s ease-in-out infinite;
 }

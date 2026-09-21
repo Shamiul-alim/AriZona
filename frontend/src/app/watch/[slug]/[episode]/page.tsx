@@ -24,7 +24,7 @@ export async function generateMetadata({
   const number = parseEpisodeParam(episode);
   if (number === null) return { title: 'Not found' };
 
-  const payload = await apiFetchOrNull<WatchPayload>(`/watch/${slug}/ep-${number}`);
+  const payload = await apiFetchOrNull<WatchPayload>(`/watch/${slug}/ep-${number}`, { revalidate: 60 });
   if (!payload) return { title: 'Not found' };
 
   const title = `${payload.anime.titleEnglish} Episode ${number}${
@@ -58,15 +58,15 @@ export default async function WatchPage({
   const number = parseEpisodeParam(episode);
   if (number === null) notFound();
 
-  const payload = await apiFetchOrNull<WatchPayload>(`/watch/${slug}/ep-${number}`);
+  const payload = await apiFetchOrNull<WatchPayload>(`/watch/${slug}/ep-${number}`, { revalidate: 60 });
   if (!payload) notFound();
 
   const [episodes, recommendations] = await Promise.all([
-    apiFetch<Paginated<EpisodeSummary>>(`/anime/${slug}/episodes${qs({ limit: 500 })}`).catch(() => ({
+    apiFetch<Paginated<EpisodeSummary>>(`/anime/${slug}/episodes${qs({ limit: 500 })}`, { revalidate: 120 }).catch(() => ({
       data: [] as EpisodeSummary[],
       meta: { page: 1, limit: 0, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },
     })),
-    apiFetch<AnimeCard[]>(`/anime/${slug}/recommendations${qs({ limit: 12 })}`).catch(() => []),
+    apiFetch<AnimeCard[]>(`/anime/${slug}/recommendations${qs({ limit: 12 })}`, { revalidate: 300 }).catch(() => []),
   ]);
 
   const jsonLd = {

@@ -31,6 +31,7 @@ export default async function AzPage({ searchParams }: { searchParams: Promise<S
 
   const results = await apiFetch<Paginated<AnimeCard>>(
     `/anime${qs({ letter, sort: 'name', page, limit: 28 })}`,
+    { revalidate: 300 },
   ).catch(() => ({
     data: [],
     meta: { page: 1, limit: 28, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },

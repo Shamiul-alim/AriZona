@@ -91,10 +91,6 @@ const nextConfig: NextConfig = {
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
 
-  experimental: {
-    optimizePackageImports: ['framer-motion'],
-  },
-
   /**
    * Same-origin API proxy for split hosting (frontend on Vercel, API on
    * Render).
