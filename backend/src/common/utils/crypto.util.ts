@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 export function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -6,6 +6,18 @@ export function sha256(value: string): string {
 
 export function randomToken(bytes = 48): string {
   return randomBytes(bytes).toString('base64url');
+}
+
+/**
+ * A numeric one-time code, zero-padded to `digits`.
+ *
+ * `randomInt` draws from the CSPRNG and rejects biased samples, unlike
+ * `Math.random()` — a reset code is a credential and must not be predictable
+ * from timing or previous codes.
+ */
+export function randomDigits(digits = 6): string {
+  const max = 10 ** digits;
+  return String(randomInt(0, max)).padStart(digits, '0');
 }
 
 export function hmacSign(payload: string, secret: string): string {

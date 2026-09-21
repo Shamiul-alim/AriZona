@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { User, UserRole, UserStatus } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import { randomToken, sha256 } from 'src/common/utils/crypto.util';
+import { randomDigits, randomToken, safeEquals, sha256 } from 'src/common/utils/crypto.util';
 import { AppConfigService } from 'src/config/app-config.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
@@ -39,6 +39,17 @@ export interface PublicUser {
 }
 
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * A six-digit code has far less entropy than a link token, so it is short
+ * lived and tolerates only a handful of guesses. Ten minutes is long enough to
+ * fetch an email and slow enough that a code is never worth queueing attacks
+ * against; five wrong guesses burns the record entirely.
+ */
+const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+const RESET_CODE_MAX_ATTEMPTS = 5;
+/** One message for every failure mode, so nothing leaks which part was wrong. */
+const RESET_CODE_REJECTED = 'That code is invalid or has expired. Request a new one.';
 const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
@@ -211,41 +222,94 @@ export class AuthService {
       return;
     }
 
+    // Requesting a new code retires every outstanding one, so only the most
+    // recent email can ever be used.
     await this.prisma.passwordResetToken.updateMany({
       where: { userId: user.id, usedAt: null },
       data: { usedAt: new Date() },
     });
 
-    const token = randomToken(48);
+    const code = randomDigits(6);
     await this.prisma.passwordResetToken.create({
       data: {
         userId: user.id,
-        tokenHash: sha256(token),
-        expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+        // Bound to the user so two people holding the same six digits do not
+        // collide on the unique index. The code itself is never stored.
+        tokenHash: sha256(`${user.id}:${code}`),
+        expiresAt: new Date(Date.now() + RESET_CODE_TTL_MS),
       },
     });
 
-    const url = `${this.config.values.siteUrl}/auth/reset-password?token=${token}`;
-    await this.mail.sendPasswordReset(user.email, user.displayName ?? user.username, url);
+    this.logger.log(`Password reset code issued for user ${user.id}`);
+    await this.mail.sendPasswordResetCode(
+      user.email,
+      user.displayName ?? user.username,
+      code,
+      Math.round(RESET_CODE_TTL_MS / 60000),
+    );
   }
 
-  async resetPassword(token: string, password: string): Promise<void> {
-    const record = await this.prisma.passwordResetToken.findUnique({
-      where: { tokenHash: sha256(token) },
-    });
-    if (!record || record.usedAt || record.expiresAt < new Date()) {
-      throw new BadRequestException('This reset link is invalid or has expired');
-    }
+  /**
+   * Checks a code without spending it, so the client can move to the
+   * "choose a new password" step before the code is consumed.
+   */
+  async verifyResetCode(email: string, code: string): Promise<void> {
+    await this.findValidResetCode(email, code);
+  }
+
+  async resetPassword(email: string, code: string, password: string): Promise<void> {
+    const { record } = await this.findValidResetCode(email, code);
 
     const passwordHash = await bcrypt.hash(password, this.config.values.bcryptRounds);
     await this.prisma.$transaction([
       this.prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
       this.prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      // Whoever reset the password keeps control; every other session dies.
       this.prisma.refreshToken.updateMany({
         where: { userId: record.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
     ]);
+    this.logger.log(`Password reset completed for user ${record.userId}`);
+  }
+
+  /**
+   * Resolves the live reset record for an address and validates the code.
+   *
+   * The lookup is by user rather than by code hash: a wrong guess hashes to
+   * nothing, so hashing first would leave no row to charge the attempt
+   * against and the ceiling could never be reached. Every rejection raises
+   * the same message, so this cannot be used to discover which addresses have
+   * accounts or which part of the input was wrong.
+   */
+  private async findValidResetCode(email: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.deletedAt) throw new BadRequestException(RESET_CODE_REJECTED);
+
+    const record = await this.prisma.passwordResetToken.findFirst({
+      where: { userId: user.id, usedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!record || record.expiresAt < new Date()) throw new BadRequestException(RESET_CODE_REJECTED);
+
+    if (record.attempts >= RESET_CODE_MAX_ATTEMPTS) {
+      await this.prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+      this.logger.warn(`Password reset code burned after too many attempts for user ${user.id}`);
+      throw new BadRequestException(RESET_CODE_REJECTED);
+    }
+
+    if (!safeEquals(record.tokenHash, sha256(`${user.id}:${code}`))) {
+      await this.prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw new BadRequestException(RESET_CODE_REJECTED);
+    }
+
+    return { user, record };
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {

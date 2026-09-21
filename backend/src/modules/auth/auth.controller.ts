@@ -25,6 +25,7 @@ import {
   RefreshDto,
   RegisterDto,
   ResetPasswordDto,
+  VerifyResetCodeDto,
   VerifyEmailDto,
 } from './dto/auth.dto';
 import { GoogleOAuthGuard } from './google-oauth.guard';
@@ -93,20 +94,33 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.ACCEPTED)
   @Throttle({ default: { limit: 4, ttl: 900_000 } })
-  @ApiOperation({ summary: 'Request a password reset link' })
+  @ApiOperation({ summary: 'Email a one-time password reset code' })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     await this.auth.forgotPassword(dto.email);
     // Deliberately identical whether or not the address exists.
-    return { message: 'If an account exists for that address, a reset link has been sent.' };
+    return { message: 'If an account exists for that address, a reset code has been sent.' };
+  }
+
+  @Public()
+  @Post('verify-reset-code')
+  @HttpCode(HttpStatus.OK)
+  // Tighter than the reset itself: this is the endpoint an attacker would
+  // hammer to walk a six-digit space. The per-code attempt ceiling is the
+  // real defence; this keeps the volume down before it is reached.
+  @Throttle({ default: { limit: 8, ttl: 900_000 } })
+  @ApiOperation({ summary: 'Check a reset code without spending it' })
+  async verifyResetCode(@Body() dto: VerifyResetCodeDto) {
+    await this.auth.verifyResetCode(dto.email, dto.code);
+    return { valid: true };
   }
 
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 6, ttl: 900_000 } })
-  @ApiOperation({ summary: 'Set a new password using a reset token' })
+  @ApiOperation({ summary: 'Set a new password using an emailed code' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
-    await this.auth.resetPassword(dto.token, dto.password);
+    await this.auth.resetPassword(dto.email, dto.code, dto.password);
     return { message: 'Your password has been updated. Please sign in.' };
   }
 

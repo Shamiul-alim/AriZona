@@ -70,11 +70,36 @@ export class ForgotPasswordDto {
   email!: string;
 }
 
+/** The six digits emailed to the account holder. */
+const RESET_CODE_RULE = /^\d{6}$/;
+const RESET_CODE_MESSAGE = 'Enter the 6-digit code from your email';
+
+export class VerifyResetCodeDto {
+  @ApiProperty()
+  @IsEmail()
+  @MaxLength(200)
+  @Transform(({ value }) => String(value).trim().toLowerCase())
+  email!: string;
+
+  @ApiProperty({ example: '048213' })
+  @IsString()
+  @Transform(({ value }) => String(value).replace(/\s+/g, ''))
+  @Matches(RESET_CODE_RULE, { message: RESET_CODE_MESSAGE })
+  code!: string;
+}
+
 export class ResetPasswordDto {
   @ApiProperty()
+  @IsEmail()
+  @MaxLength(200)
+  @Transform(({ value }) => String(value).trim().toLowerCase())
+  email!: string;
+
+  @ApiProperty({ example: '048213' })
   @IsString()
-  @MaxLength(400)
-  token!: string;
+  @Transform(({ value }) => String(value).replace(/\s+/g, ''))
+  @Matches(RESET_CODE_RULE, { message: RESET_CODE_MESSAGE })
+  code!: string;
 
   @ApiProperty()
   @IsString()

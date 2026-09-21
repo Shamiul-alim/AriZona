@@ -70,6 +70,33 @@ export class MailService implements OnModuleInit {
     });
   }
 
+  /**
+   * Sends the one-time password-reset code.
+   *
+   * The code is shown in the body rather than embedded in a link: nothing here
+   * is clickable, so the message cannot be forwarded into a working reset, and
+   * a password is never sent by email.
+   */
+  async sendPasswordResetCode(to: string, username: string, code: string, expiresInMinutes: number): Promise<void> {
+    const siteName = this.config.values.siteName;
+    const spaced = code.split('').join(' ');
+    await this.send({
+      to,
+      subject: `${code} is your ${siteName} password reset code`,
+      text: `Hi ${username},\n\nYour ${siteName} password reset code is ${code}.\nIt expires in ${expiresInMinutes} minutes and can be used once.\n\nIf you did not request this, ignore this email — your password will not change.`,
+      html: this.layout(
+        siteName,
+        `<p>Hi ${escapeHtml(username)},</p>
+         <p>Use this code to reset your ${escapeHtml(siteName)} password.</p>
+         <p style="margin:32px 0">
+           <span style="display:inline-block;background:#12121c;border:1px solid #2a2a3d;color:#fff;font-size:30px;font-weight:700;letter-spacing:10px;padding:18px 28px;border-radius:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(spaced)}</span>
+         </p>
+         <p>It expires in <strong>${expiresInMinutes} minutes</strong> and can only be used once.</p>
+         <p style="color:#9ba0b5;font-size:13px">If you did not request this, ignore this email — your password will not change. Never share this code with anyone.</p>`,
+      ),
+    });
+  }
+
   async sendEmailVerification(to: string, username: string, verifyUrl: string): Promise<void> {
     const siteName = this.config.values.siteName;
     await this.send({
