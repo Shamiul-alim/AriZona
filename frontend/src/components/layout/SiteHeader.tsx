@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { SmartImage as Image } from '@/components/ui/SmartImage';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { searchTerm } from '@/lib/search';
 import { apiFetch, qs } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import type { AnimeCard, GenreRef, Paginated } from '@/lib/types';
@@ -85,20 +86,35 @@ export function SiteHeader() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  // Debounced type-ahead search.
+  // Debounced type-ahead search. One character is a real search; only an
+  // empty or whitespace-only query is skipped.
   useEffect(() => {
-    if (query.trim().length < 2) {
+    const term = searchTerm(query);
+    if (!term) {
       setResults([]);
+      setSearching(false);
       return;
     }
     setSearching(true);
+    // Short queries fire more often, so an older, slower response ("a") must
+    // not land on top of a newer one ("an"). Only the latest query may commit.
+    let stale = false;
     const timer = setTimeout(() => {
-      apiFetch<Paginated<AnimeCard>>(`/anime${qs({ q: query.trim(), limit: 6 })}`)
-        .then((res) => setResults(res.data))
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
+      apiFetch<Paginated<AnimeCard>>(`/anime${qs({ q: term, limit: 6 })}`)
+        .then((res) => {
+          if (!stale) setResults(res.data);
+        })
+        .catch(() => {
+          if (!stale) setResults([]);
+        })
+        .finally(() => {
+          if (!stale) setSearching(false);
+        });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
   }, [query]);
 
   const handleLogout = useCallback(async () => {
@@ -113,8 +129,9 @@ export function SiteHeader() {
   const submitSearch = useCallback(
     (event: React.FormEvent) => {
       event.preventDefault();
-      if (!query.trim()) return;
-      router.push(`/browse${qs({ q: query.trim() })}`);
+      const term = searchTerm(query);
+      if (!term) return;
+      router.push(`/browse${qs({ q: term })}`);
       setSearchOpen(false);
     },
     [query, router],
@@ -232,7 +249,7 @@ export function SiteHeader() {
               </svg>
             </form>
 
-            {searchOpen && query.trim().length >= 2 ? (
+            {searchOpen && searchTerm(query) ? (
               <div className="absolute right-0 top-11 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
                 {searching ? (
                   <p className="px-4 py-6 text-center text-[13px] text-ink-faint">Searching…</p>
