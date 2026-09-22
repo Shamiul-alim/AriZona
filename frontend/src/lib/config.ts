@@ -108,19 +108,96 @@ export function positiveNumber(raw: string | undefined, fallback: number): numbe
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+/** Comma-separated route prefixes, e.g. "/auth,/admin". */
+export function routeList(raw: string | undefined, fallback: string[]): string[] {
+  const items = (raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith('/'));
+  return items.length > 0 ? items : fallback;
+}
+
+/** The placement key an Adsterra script URL carries in its file name. */
+export function placementKeyFromSrc(src: string): string {
+  const match = /([0-9a-f]{32})(?:\.js|\/invoke\.js)?(?:[?#].*)?$/i.exec(src);
+  return match ? match[1].toLowerCase() : '';
+}
+
+/** "false" switches a feature off; anything else inherits the master switch. */
+function flag(raw: string | undefined, inherit: boolean): boolean {
+  return inherit && raw?.trim().toLowerCase() !== 'false';
+}
+
+const adsterraEnabled = process.env.NEXT_PUBLIC_ADSTERRA_ENABLED === 'true';
+const popunderSrc = adScriptUrl(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_SRC);
+
+/**
+ * The single place that decides what advertising runs where.
+ *
+ * Placement keys and script URLs below necessarily ship to every browser (they
+ * are visible in page source on any site that runs them), so they are public
+ * configuration, not secrets.
+ */
 export const ADSTERRA = {
-  enabled: process.env.NEXT_PUBLIC_ADSTERRA_ENABLED === 'true',
-  popunderSrc: adScriptUrl(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_SRC),
+  /** Master switch. Nothing Adsterra-related loads when this is off. */
+  enabled: adsterraEnabled,
+
+  popunder: {
+    enabled: flag(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_ENABLED, adsterraEnabled) && Boolean(popunderSrc),
+    src: popunderSrc,
+    key: placementKeyFromSrc(popunderSrc),
+    /**
+     * Minimum gap between two popunders in one browser. Adsterra itself re-arms
+     * roughly 10–20 seconds after an impression, which on its own turned the
+     * first several clicks of a visit into ads. This spaces them out.
+     */
+    cooldownMinutes: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_COOLDOWN_MINUTES, 5),
+    /**
+     * Where the popunder must never be clickable. /watch is excluded because the
+     * vendor's click layer covers the whole viewport — including the video
+     * player — and cannot be told to leave the controls alone.
+     */
+    excludedRoutes: routeList(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_EXCLUDED_ROUTES, ['/auth', '/admin', '/watch']),
+  },
+
   /**
-   * Optional extra ceiling, in hours, on how often this browser may load the
-   * vendor script. Defaults to 0 = no extra cap, because Adsterra already
-   * enforces its own impression frequency (the `pp_main_*` cookie it sets,
-   * configured in the Adsterra dashboard). Stacking a second cap on top of
-   * that one is what previously suppressed ads entirely: our cap was spent on
-   * page load, so the vendor never got a second chance to show anything.
+   * Fixed-size display banners (Adsterra "iframe" format). Each renders inside
+   * its own isolated frame, so the vendor's shared `atOptions` global can never
+   * be overwritten by a neighbouring slot.
    */
-  frequencyHours: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_FREQUENCY_HOURS, 0),
-};
+  banners: {
+    enabled: flag(process.env.NEXT_PUBLIC_ADSTERRA_BANNERS_ENABLED, adsterraEnabled),
+    host: 'https://www.highrevenueformat.com',
+    units: {
+      '728x90': 'b3a1975cf66d76519eb6ab201dfa5ca9',
+      '468x60': '187123d40d9a9a228a802d21b9016bf6',
+      '320x50': '71902749fb8e599898d1406f2c1682ad',
+      '300x250': '51efabb604e2727dacfe91e27101d7e8',
+      '160x300': '31d5087e8f4bdf66620f64d04037cceb',
+    },
+    excludedRoutes: ['/auth', '/admin'],
+    /**
+     * Which existing <AdSlot> positions carry a banner. Deliberately sparse —
+     * at most two per page, never directly under the hero (it would compete
+     * with the page's largest paint) and never above the video player.
+     * Anything not listed here renders nothing.
+     */
+    slots: {
+      // Homepage: one leaderboard mid-page, one rectangle in the wide sidebar.
+      home_between_grids: 'leaderboard',
+      watch_sidebar: 'rectangle',
+      // Anime detail: one leaderboard above the episode list.
+      anime_detail_episodes: 'leaderboard',
+      // Watch page: below the episode information, never over the player.
+      watch_below_player: 'leaderboard',
+      // Catalogue pages: one leaderboard among the results.
+      search_results: 'leaderboard',
+      browse_in_grid: 'leaderboard',
+    } as Record<string, 'leaderboard' | 'rectangle' | 'skyscraper'>,
+  },
+} as const;
+
+export type BannerSize = keyof typeof ADSTERRA.banners.units;
 
 /**
  * Media URLs arrive from the API already signed and absolute. When the backend

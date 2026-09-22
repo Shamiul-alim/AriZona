@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { ADS } from '@/lib/config';
+import { ADS, ADSTERRA } from '@/lib/config';
+import { AdsterraBanner } from './AdsterraBanner';
 import type { AdsConfig, DisplayPlacement } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -67,7 +68,15 @@ interface AdSlotProps {
   className?: string;
 }
 
-export function AdSlot({ placementKey, format = 'leaderboard', className }: AdSlotProps) {
+export function AdSlot(props: AdSlotProps) {
+  // Positions mapped to an Adsterra banner render it directly: its size is
+  // known up front, so it needs no config round trip and never shifts layout.
+  const layout = ADSTERRA.banners.enabled ? ADSTERRA.banners.slots[props.placementKey] : undefined;
+  if (layout) return <AdsterraBanner layout={layout} className={props.className} />;
+  return <AdSenseSlot {...props} />;
+}
+
+function AdSenseSlot({ placementKey, format = 'leaderboard', className }: AdSlotProps) {
   const [placement, setPlacement] = useState<DisplayPlacement | null>(null);
   const [resolved, setResolved] = useState(false);
   const insRef = useRef<HTMLModElement | null>(null);
@@ -121,6 +130,10 @@ export function AdSlot({ placementKey, format = 'leaderboard', className }: AdSl
   }
 
   if (!resolved) {
+    // Reserving space here and then collapsing it when the placement turns out
+    // to be unconfigured shifted every page in production. Only reserve where
+    // an ad is actually configured to appear (development shows the outline).
+    if (process.env.NODE_ENV === 'production') return null;
     return <div className={cn('rounded-xl', HEIGHTS[format], className)} aria-hidden="true" />;
   }
 

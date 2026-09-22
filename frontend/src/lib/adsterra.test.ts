@@ -1,88 +1,139 @@
 import { describe, expect, it } from 'vitest';
-import { cooldownElapsed, shouldArmPopunder, type PopunderContext } from './adsterra';
-import { adScriptUrl, positiveNumber } from './config';
+import {
+  cooldownRemaining,
+  isPopunderActive,
+  isRouteExcluded,
+  popunderGateCss,
+  shouldLoadPopunder,
+  type PopunderActiveContext,
+  type PopunderLoadContext,
+} from './adsterra';
+import { adScriptUrl, placementKeyFromSrc, positiveNumber, routeList } from './config';
 
-const HOUR = 60 * 60 * 1000;
+const MIN = 60 * 1000;
 const NOW = 1_800_000_000_000;
+const EXCLUDED = ['/auth', '/admin', '/watch'];
 
-function context(overrides: Partial<PopunderContext> = {}): PopunderContext {
+function load(overrides: Partial<PopunderLoadContext> = {}): PopunderLoadContext {
+  return { enabled: true, pathname: '/', status: 'anonymous', role: null, excludedRoutes: EXCLUDED, alreadyInjected: false, ...overrides };
+}
+
+function active(overrides: Partial<PopunderActiveContext> = {}): PopunderActiveContext {
   return {
-    enabled: true,
-    scriptSrc: '//ads.example.test/abc123/invoke.js',
-    pathname: '/',
-    status: 'anonymous',
-    role: null,
-    lastArmedAt: null,
-    frequencyHours: 12,
-    now: NOW,
-    alreadyInjected: false,
-    ...overrides,
+    enabled: true, pathname: '/', status: 'anonymous', role: null, excludedRoutes: EXCLUDED,
+    lastPopAt: null, cooldownMs: 5 * MIN, now: NOW, ...overrides,
   };
 }
 
-describe('shouldArmPopunder', () => {
-  it('arms for a signed-out visitor on a public page', () => {
-    expect(shouldArmPopunder(context())).toBe(true);
-  });
-
-  it('arms for a normal signed-in user', () => {
-    expect(shouldArmPopunder(context({ status: 'authenticated', role: 'USER' }))).toBe(true);
-  });
-
-  it('does nothing when the integration is switched off or unconfigured', () => {
-    expect(shouldArmPopunder(context({ enabled: false }))).toBe(false);
-    expect(shouldArmPopunder(context({ scriptSrc: '' }))).toBe(false);
-  });
-
-  it('never arms inside the admin dashboard', () => {
-    expect(shouldArmPopunder(context({ pathname: '/admin' }))).toBe(false);
-    expect(shouldArmPopunder(context({ pathname: '/admin/anime/new' }))).toBe(false);
-  });
-
-  it('never arms during authentication flows', () => {
-    expect(shouldArmPopunder(context({ pathname: '/auth/login' }))).toBe(false);
-    expect(shouldArmPopunder(context({ pathname: '/auth/register' }))).toBe(false);
+describe('isRouteExcluded', () => {
+  it('matches a prefix and everything beneath it', () => {
+    expect(isRouteExcluded('/auth', EXCLUDED)).toBe(true);
+    expect(isRouteExcluded('/auth/login', EXCLUDED)).toBe(true);
+    expect(isRouteExcluded('/watch/sintel/ep-1', EXCLUDED)).toBe(true);
+    expect(isRouteExcluded('/admin/anime/new', EXCLUDED)).toBe(true);
   });
 
   it('does not mistake a lookalike route for an excluded one', () => {
-    expect(shouldArmPopunder(context({ pathname: '/administrators' }))).toBe(true);
-    expect(shouldArmPopunder(context({ pathname: '/anime/authority' }))).toBe(true);
-  });
-
-  it('never arms for staff accounts, anywhere', () => {
-    for (const role of ['MODERATOR', 'ADMIN', 'SUPER_ADMIN'] as const) {
-      expect(shouldArmPopunder(context({ status: 'authenticated', role }))).toBe(false);
-    }
-  });
-
-  it('waits until the session is known', () => {
-    expect(shouldArmPopunder(context({ status: 'idle' }))).toBe(false);
-    expect(shouldArmPopunder(context({ status: 'loading' }))).toBe(false);
-  });
-
-  it('respects the cooldown between armings', () => {
-    expect(shouldArmPopunder(context({ lastArmedAt: NOW - 2 * HOUR }))).toBe(false);
-    expect(shouldArmPopunder(context({ lastArmedAt: NOW - 13 * HOUR }))).toBe(true);
-  });
-
-  it('arms only once per page load', () => {
-    expect(shouldArmPopunder(context({ alreadyInjected: true }))).toBe(false);
+    expect(isRouteExcluded('/administrators', EXCLUDED)).toBe(false);
+    expect(isRouteExcluded('/watchlist', EXCLUDED)).toBe(false);
+    expect(isRouteExcluded('/anime/authority', EXCLUDED)).toBe(false);
   });
 });
 
-describe('cooldownElapsed', () => {
-  it('allows the first ever arming', () => {
-    expect(cooldownElapsed(null, 12, NOW)).toBe(true);
+describe('shouldLoadPopunder', () => {
+  it('loads for a visitor on a public page', () => {
+    expect(shouldLoadPopunder(load())).toBe(true);
+    expect(shouldLoadPopunder(load({ status: 'authenticated', role: 'USER' }))).toBe(true);
   });
 
-  it('treats a zero or invalid frequency as "no cooldown"', () => {
-    expect(cooldownElapsed(NOW - 1000, 0, NOW)).toBe(true);
-    expect(cooldownElapsed(NOW - 1000, Number.NaN, NOW)).toBe(true);
+  it('loads at most once per document', () => {
+    expect(shouldLoadPopunder(load({ alreadyInjected: true }))).toBe(false);
   });
 
-  it('blocks inside the window and allows on the boundary', () => {
-    expect(cooldownElapsed(NOW - 11 * HOUR, 12, NOW)).toBe(false);
-    expect(cooldownElapsed(NOW - 12 * HOUR, 12, NOW)).toBe(true);
+  it('never loads on auth, admin or the watch page', () => {
+    for (const pathname of ['/auth/login', '/auth/forgot-password', '/admin', '/watch/sintel/ep-1']) {
+      expect(shouldLoadPopunder(load({ pathname }))).toBe(false);
+    }
+  });
+
+  it('never loads for staff, and waits for the session', () => {
+    for (const role of ['MODERATOR', 'ADMIN', 'SUPER_ADMIN'] as const) {
+      expect(shouldLoadPopunder(load({ status: 'authenticated', role }))).toBe(false);
+    }
+    expect(shouldLoadPopunder(load({ status: 'loading' }))).toBe(false);
+    expect(shouldLoadPopunder(load({ enabled: false }))).toBe(false);
+  });
+});
+
+describe('isPopunderActive', () => {
+  it('is clickable on an eligible page with no recent impression', () => {
+    expect(isPopunderActive(active())).toBe(true);
+  });
+
+  it('is disabled on excluded routes even after the script loaded elsewhere', () => {
+    // The layer follows client-side navigation; the gate is what stops it.
+    expect(isPopunderActive(active({ pathname: '/auth/login' }))).toBe(false);
+    expect(isPopunderActive(active({ pathname: '/watch/x/ep-1' }))).toBe(false);
+  });
+
+  it('is disabled for staff', () => {
+    expect(isPopunderActive(active({ status: 'authenticated', role: 'ADMIN' }))).toBe(false);
+  });
+
+  it('is disabled during the cooldown and re-enabled after it', () => {
+    expect(isPopunderActive(active({ lastPopAt: NOW - 1 * MIN }))).toBe(false);
+    expect(isPopunderActive(active({ lastPopAt: NOW - 5 * MIN }))).toBe(true);
+    expect(isPopunderActive(active({ lastPopAt: NOW - 30 * MIN }))).toBe(true);
+  });
+});
+
+describe('cooldownRemaining', () => {
+  it('reports how long until the next popunder may open', () => {
+    expect(cooldownRemaining(null, 5 * MIN, NOW)).toBe(0);
+    expect(cooldownRemaining(NOW - 2 * MIN, 5 * MIN, NOW)).toBe(3 * MIN);
+    expect(cooldownRemaining(NOW - 6 * MIN, 5 * MIN, NOW)).toBe(0);
+  });
+
+  it('never locks ads out because of a bad timestamp or zero cooldown', () => {
+    expect(cooldownRemaining(NOW + 60 * MIN, 5 * MIN, NOW)).toBe(0);
+    expect(cooldownRemaining(Number.NaN, 5 * MIN, NOW)).toBe(0);
+    expect(cooldownRemaining(NOW - 1000, 0, NOW)).toBe(0);
+  });
+});
+
+describe('popunderGateCss', () => {
+  const KEY = 'b6b5afe0063ae2809cdf748ffd1f190e';
+
+  it('hides the layer unless the gate is explicitly open', () => {
+    const css = popunderGateCss(KEY);
+    expect(css).toContain('html:not([data-popunder="on"])');
+    expect(css).toContain(`a[href*="${KEY}"]`);
+    expect(css).toContain('pointer-events:none');
+  });
+
+  it('refuses anything that is not a placement key', () => {
+    expect(popunderGateCss('')).toBe('');
+    expect(popunderGateCss('"] body{display:none}')).toBe('');
+  });
+});
+
+describe('placementKeyFromSrc', () => {
+  it('reads the key from both Adsterra URL shapes', () => {
+    expect(placementKeyFromSrc('https://pl1.example.test/b6/b5/af/b6b5afe0063ae2809cdf748ffd1f190e.js')).toBe(
+      'b6b5afe0063ae2809cdf748ffd1f190e',
+    );
+    expect(placementKeyFromSrc('https://pl2.example.test/5244bd78490b6bf38c7c2f850281cbf0/invoke.js')).toBe(
+      '5244bd78490b6bf38c7c2f850281cbf0',
+    );
+    expect(placementKeyFromSrc('')).toBe('');
+  });
+});
+
+describe('routeList', () => {
+  it('parses prefixes and falls back when empty', () => {
+    expect(routeList('/auth, /admin ,/watch', [])).toEqual(['/auth', '/admin', '/watch']);
+    expect(routeList('', ['/auth'])).toEqual(['/auth']);
+    expect(routeList('nonsense', ['/auth'])).toEqual(['/auth']);
   });
 });
 
