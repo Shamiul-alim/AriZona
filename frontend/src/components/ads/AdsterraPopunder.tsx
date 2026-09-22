@@ -98,7 +98,8 @@ export function AdsterraPopunder() {
     };
     const allowed = shouldArmPopunder(context);
 
-    report({
+    /** One shape for every report, so the fields never disagree between them. */
+    const describe = (extra: Record<string, unknown>) => ({
       adsEnabled: ADSTERRA.enabled,
       scriptConfigured: Boolean(ADSTERRA.popunderSrc),
       scriptUrl: ADSTERRA.popunderSrc || null,
@@ -111,7 +112,10 @@ export function AdsterraPopunder() {
       alreadyInjectedThisPageLoad: injected,
       willInject: allowed,
       scriptLoaded: false,
+      ...extra,
     });
+
+    report(describe({}));
 
     if (!allowed) return;
 
@@ -125,13 +129,13 @@ export function AdsterraPopunder() {
         // Only now has the vendor actually taken over: record the load, so an
         // optional operator-imposed ceiling measures something real.
         markArmed();
-        report({ ...context, willInject: true, scriptLoaded: true });
+        report(describe({ scriptLoaded: true }));
       };
       script.onerror = () => {
         // Blocked by an extension or a network failure. Never break the page,
         // and allow a retry on a later navigation rather than burning a slot.
         injected = false;
-        report({ ...context, willInject: true, scriptLoaded: false, blocked: true });
+        report(describe({ scriptLoaded: false, blocked: true }));
       };
       document.body.appendChild(script);
       injected = true;
