@@ -12,7 +12,7 @@ import { AnimeRail } from '@/components/anime/AnimeRail';
 import { HeroSlider } from '@/components/anime/HeroSlider';
 import { RankedList } from '@/components/anime/RankedList';
 import { SectionHeader } from '@/components/anime/SectionHeader';
-import { ContinueWatchingRail } from '@/components/home/ContinueWatchingRail';
+import { ContinueWatchingLazy } from '@/components/home/ContinueWatchingLazy';
 import { LatestEpisodesSection } from '@/components/home/LatestEpisodesSection';
 import { TopAnimeSection } from '@/components/home/TopAnimeSection';
 import { AzStrip } from '@/components/anime/AzStrip';
@@ -75,7 +75,7 @@ export default async function HomePage() {
       <div className="mx-auto max-w-[1600px] space-y-14 px-4 pt-10 pb-16 md:px-6">
         <AdSlot placementKey="home_below_hero" format="leaderboard" className="-mt-6" />
 
-        <ContinueWatchingRail />
+        <ContinueWatchingLazy />
 
         <LatestEpisodesSection initial={latest.data} />
 
