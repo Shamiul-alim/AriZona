@@ -147,11 +147,19 @@ export const ADSTERRA = {
     src: popunderSrc,
     key: placementKeyFromSrc(popunderSrc),
     /**
-     * Minimum gap between two popunders in one browser. Adsterra itself re-arms
-     * roughly 10–20 seconds after an impression, which on its own turned the
-     * first several clicks of a visit into ads. This spaces them out.
+     * Minimum gap between two popunders in one browser, in seconds.
+     *
+     * At the default of 5s this is no longer the limiting factor: Adsterra
+     * re-arms roughly 10–20 seconds after an impression and stops after a few
+     * per day (its own cookies), so the vendor's pace governs. Raise it to
+     * space ads out further — the visitor's own click always still lands
+     * either way.
      */
-    cooldownMinutes: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_COOLDOWN_MINUTES, 5),
+    cooldownSeconds: positiveNumber(
+      process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_COOLDOWN_SECONDS,
+      // The older minutes setting still wins if it is the one that is set.
+      positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_COOLDOWN_MINUTES, 0) * 60 || 5,
+    ),
     /**
      * Where the popunder must never be clickable. /watch is excluded because the
      * vendor's click layer covers the whole viewport — including the video

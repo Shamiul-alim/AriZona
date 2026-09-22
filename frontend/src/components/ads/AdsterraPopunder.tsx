@@ -150,8 +150,8 @@ export function AdsterraPopunder() {
   const router = useRouter();
   const status = useAuthStore((s) => s.status);
   const role = useAuthStore((s) => s.user?.role ?? null);
-  const { enabled, src, key, cooldownMinutes, excludedRoutes } = ADSTERRA.popunder;
-  const cooldownMs = cooldownMinutes * 60_000;
+  const { enabled, src, key, cooldownSeconds, excludedRoutes } = ADSTERRA.popunder;
+  const cooldownMs = cooldownSeconds * 1000;
 
   // Read synchronously so the gate never opens for one render during a
   // cooldown. It is never rendered, so it cannot cause a hydration mismatch.
@@ -205,7 +205,7 @@ export function AdsterraPopunder() {
       sessionStatus: status,
       scriptInjected: injected,
       layerClickable: active,
-      cooldownMinutes,
+      cooldownSeconds,
       lastPopAt: lastPopAt ? new Date(lastPopAt).toISOString() : null,
       nextEligibleAt: remaining > 0 ? new Date(now + remaining).toISOString() : 'now',
     });
@@ -214,7 +214,7 @@ export function AdsterraPopunder() {
       const timer = setTimeout(() => setTick((n) => n + 1), remaining + 50);
       return () => clearTimeout(timer);
     }
-  }, [enabled, key, pathname, status, role, excludedRoutes, lastPopAt, cooldownMs, cooldownMinutes, tick]);
+  }, [enabled, key, pathname, status, role, excludedRoutes, lastPopAt, cooldownMs, cooldownSeconds, tick]);
 
   useEffect(() => {
     navigate = (href) => router.push(href);
