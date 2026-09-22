@@ -38,6 +38,17 @@ function recipientDomain(address: string): string {
 }
 
 /**
+ * Subjects are recorded so an operator can tell which message failed — but the
+ * reset subject deliberately leads with the code ("760468 is your AniZora
+ * password reset code") so it shows in a notification preview. That code must
+ * never reach a log line or the diagnostics endpoint, so any run of four or
+ * more digits is masked before the subject is stored anywhere.
+ */
+function redactSubject(subject: string): string {
+  return subject.replace(/\d{4,}/g, '••••••');
+}
+
+/**
  * MAIL_DRIVER=log writes the message to the application log instead of sending
  * it. That is the development default so no SMTP account is required to
  * exercise the password-reset flow end to end.
@@ -196,7 +207,9 @@ export class MailService implements OnModuleInit {
   async send({ to, subject, html, text }: SendOptions): Promise<MailAttempt> {
     const { mail } = this.config.values;
     const from = `"${mail.fromName}" <${mail.fromAddress}>`;
-    const base = { at: new Date().toISOString(), subject, recipientDomain: recipientDomain(to) };
+    // Everything recorded or logged from here on uses the masked subject.
+    const safeSubject = redactSubject(subject);
+    const base = { at: new Date().toISOString(), subject: safeSubject, recipientDomain: recipientDomain(to) };
     const transporter = await this.ensureTransport();
 
     if (!transporter) {
@@ -204,7 +217,14 @@ export class MailService implements OnModuleInit {
         mail.driver === 'smtp'
           ? `No usable SMTP port to ${mail.host} (tried ${this.portResults().map((p) => p.port).join(', ') || 'none'})`
           : 'MAIL_DRIVER=log — message was logged, not delivered';
-      this.logger.log(`[mail:log] to=${to} subject="${subject}"\n${text}`);
+      // The dev log driver exists so the code can be read without an inbox, so
+      // it prints the body — but only outside production, where the same line
+      // would put a live reset code into the platform's log store.
+      if (this.config.values.nodeEnv === 'production') {
+        this.logger.log(`[mail:log] domain=${base.recipientDomain} subject="${safeSubject}" (body withheld)`);
+      } else {
+        this.logger.log(`[mail:log] to=${to} subject="${subject}"\n${text}`);
+      }
       return this.record({ ...base, driver: 'log', ok: false, error: reason });
     }
 
@@ -225,11 +245,11 @@ export class MailService implements OnModuleInit {
         rejected: info.rejected?.length ?? 0,
       });
       this.logger.log(
-        `mail sent subject="${subject}" domain=${attempt.recipientDomain} accepted=${attempt.accepted} ` +
+        `mail sent subject="${safeSubject}" domain=${attempt.recipientDomain} accepted=${attempt.accepted} ` +
           `rejected=${attempt.rejected} messageId=${attempt.messageId ?? 'none'} response="${attempt.providerResponse ?? ''}"`,
       );
       if (!attempt.ok) {
-        this.logger.error(`mail REJECTED by provider subject="${subject}" domain=${attempt.recipientDomain}`);
+        this.logger.error(`mail REJECTED by provider subject="${safeSubject}" domain=${attempt.recipientDomain}`);
       }
       return attempt;
     } catch (error) {
@@ -243,7 +263,7 @@ export class MailService implements OnModuleInit {
         providerResponse: err.response,
       });
       this.logger.error(
-        `mail FAILED subject="${subject}" domain=${attempt.recipientDomain} ` +
+        `mail FAILED subject="${safeSubject}" domain=${attempt.recipientDomain} ` +
           `code=${attempt.errorCode ?? 'none'} error="${err.message}" response="${err.response ?? ''}"`,
       );
       return attempt;
