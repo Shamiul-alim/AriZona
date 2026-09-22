@@ -77,11 +77,42 @@ export const VIDEO_ADS = {
  * These are NEXT_PUBLIC_* values inlined at build time (the same as the
  * AdSense settings above), so changing them needs a frontend rebuild.
  */
+/**
+ * Accepts either a bare URL or the whole `<script src="…"></script>` snippet
+ * that the ad dashboard hands you.
+ *
+ * Pasting the entire tag is the obvious thing to do, and it fails silently:
+ * the value lands in `script.src`, the browser resolves it as a relative path,
+ * and the request 404s with no error anywhere. Extracting the URL costs one
+ * regex and removes a whole class of "the ads just don't work" reports.
+ * Anything that is not an http(s) URL is discarded rather than requested.
+ */
+export function adScriptUrl(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (!value) return '';
+  const fromTag = /src\s*=\s*["']([^"']+)["']/i.exec(value);
+  const candidate = (fromTag ? fromTag[1] : value).trim();
+  // Protocol-relative URLs are common in ad snippets.
+  const absolute = candidate.startsWith('//') ? `https:${candidate}` : candidate;
+  try {
+    const url = new URL(absolute);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Positive number, or the fallback. Empty strings are not nullish, so `??` is not enough. */
+export function positiveNumber(raw: string | undefined, fallback: number): number {
+  const value = Number(raw?.trim());
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 export const ADSTERRA = {
   enabled: process.env.NEXT_PUBLIC_ADSTERRA_ENABLED === 'true',
-  popunderSrc: process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_SRC ?? '',
+  popunderSrc: adScriptUrl(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_SRC),
   /** Hours before the same browser may arm the popunder again. */
-  frequencyHours: Number(process.env.NEXT_PUBLIC_ADSTERRA_FREQUENCY_HOURS ?? '12'),
+  frequencyHours: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_FREQUENCY_HOURS, 12),
 };
 
 /**

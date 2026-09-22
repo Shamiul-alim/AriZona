@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cooldownElapsed, shouldArmPopunder, type PopunderContext } from './adsterra';
+import { adScriptUrl, positiveNumber } from './config';
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -82,5 +83,52 @@ describe('cooldownElapsed', () => {
   it('blocks inside the window and allows on the boundary', () => {
     expect(cooldownElapsed(NOW - 11 * HOUR, 12, NOW)).toBe(false);
     expect(cooldownElapsed(NOW - 12 * HOUR, 12, NOW)).toBe(true);
+  });
+});
+
+describe('ad script URL parsing', () => {
+  it('accepts a bare URL', () => {
+    expect(adScriptUrl('https://ads.example.test/a/b/c.js')).toBe('https://ads.example.test/a/b/c.js');
+  });
+
+  it('extracts the URL from a pasted <script> tag', () => {
+    // Exactly what an ad dashboard hands you, and what a person will paste.
+    const tag = '<script src="https://ads.example.test/a/b/c.js"></script>';
+    expect(adScriptUrl(tag)).toBe('https://ads.example.test/a/b/c.js');
+  });
+
+  it('handles single quotes and stray whitespace', () => {
+    expect(adScriptUrl("  <script type='text/javascript' src='https://ads.example.test/x.js'></script>  ")).toBe(
+      'https://ads.example.test/x.js',
+    );
+  });
+
+  it('upgrades a protocol-relative URL', () => {
+    expect(adScriptUrl('//ads.example.test/x.js')).toBe('https://ads.example.test/x.js');
+  });
+
+  it('discards anything that is not an http(s) URL', () => {
+    // A relative path would silently 404 against our own origin.
+    expect(adScriptUrl('/local-file.js')).toBe('');
+    expect(adScriptUrl('javascript:alert(1)')).toBe('');
+    expect(adScriptUrl('')).toBe('');
+    expect(adScriptUrl(undefined)).toBe('');
+  });
+});
+
+describe('positiveNumber', () => {
+  it('uses the value when it is a positive number', () => {
+    expect(positiveNumber('6', 12)).toBe(6);
+  });
+
+  it('falls back for empty, zero, negative and non-numeric values', () => {
+    // An empty string is not nullish, so `??` would let 0 through and disable
+    // the frequency cap entirely.
+    expect(positiveNumber('', 12)).toBe(12);
+    expect(positiveNumber('   ', 12)).toBe(12);
+    expect(positiveNumber('0', 12)).toBe(12);
+    expect(positiveNumber('-3', 12)).toBe(12);
+    expect(positiveNumber('abc', 12)).toBe(12);
+    expect(positiveNumber(undefined, 12)).toBe(12);
   });
 });
