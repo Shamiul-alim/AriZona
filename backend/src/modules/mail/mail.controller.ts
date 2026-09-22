@@ -37,6 +37,8 @@ export class MailController {
     return {
       config,
       verify,
+      /** Which submission ports this host can actually reach. */
+      ports: this.mail.portResults(),
       // Common misconfigurations, named rather than left for the reader to spot.
       warnings: [
         config.driver !== 'smtp' && 'MAIL_DRIVER is not "smtp": mail is logged, never delivered.',
@@ -45,6 +47,9 @@ export class MailController {
         config.fromDomain.endsWith('.local') &&
           `MAIL_FROM_ADDRESS is ${config.fromAddress}: no provider will relay an unverifiable sender domain.`,
         !verify.ok && verify.error && `SMTP handshake failed: ${verify.error}`,
+        config.activePort !== null &&
+          config.activePort !== config.port &&
+          `Reaching the provider on fallback port ${config.activePort}; the configured port ${config.port} is blocked from this host.`,
       ].filter(Boolean),
       recentAttempts: this.mail.recentAttempts(),
     };

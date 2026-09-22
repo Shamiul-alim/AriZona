@@ -49,6 +49,9 @@ export class MailService implements OnModuleInit {
   private readonly attempts: MailAttempt[] = [];
   /** Result of the last SMTP handshake check, for the admin diagnostic. */
   private verifyState: { ok: boolean; checkedAt: string; error?: string } | null = null;
+  /** The port that actually reached the provider, once one has. */
+  private activePort: number | null = null;
+  private portReport: Array<{ port: number; secure: boolean; ok: boolean; error?: string }> = [];
 
   constructor(private readonly config: AppConfigService) {}
 
@@ -71,38 +74,104 @@ export class MailService implements OnModuleInit {
       this.logger.error('MAIL_DRIVER=smtp but MAIL_USER/MAIL_PASSWORD are empty — the provider will refuse to relay.');
     }
 
-    this.transporter = nodemailer.createTransport({
-      host: mail.host,
-      port: mail.port,
-      secure: mail.secure,
-      auth: mail.user ? { user: mail.user, pass: mail.password } : undefined,
-    });
-
     // Prove at boot that host/port/credentials actually work, rather than
     // discovering it only when someone is locked out of their account.
     void this.verifyTransport();
   }
 
-  /** Opens a connection and authenticates, without sending anything. */
+  /**
+   * Ports to try, in order, starting with whatever the operator configured.
+   *
+   * Several hosts — Render among them — silently drop outbound SMTP on the
+   * usual submission ports, which surfaces as a connect timeout rather than a
+   * refusal. Brevo answers on 2525 and 465 as well, and those are rarely
+   * filtered, so a blocked 587 no longer means no email at all.
+   */
+  private candidatePorts(): Array<{ port: number; secure: boolean }> {
+    const mail = this.config.values.mail;
+    const out: Array<{ port: number; secure: boolean }> = [];
+    const seen = new Set<number>();
+    const add = (port: number, secure: boolean) => {
+      if (!seen.has(port)) {
+        seen.add(port);
+        out.push({ port, secure });
+      }
+    };
+    add(mail.port, mail.secure);
+    add(2525, false);
+    add(465, true);
+    add(587, false);
+    return out;
+  }
+
+  private build(port: number, secure: boolean): Transporter {
+    const mail = this.config.values.mail;
+    return nodemailer.createTransport({
+      host: mail.host,
+      port,
+      secure,
+      auth: mail.user ? { user: mail.user, pass: mail.password } : undefined,
+      // Without these a blocked port hangs the request until the platform
+      // kills it, which is how this failure stayed invisible.
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 25_000,
+    });
+  }
+
+  /**
+   * Opens a connection and authenticates, without sending anything, falling
+   * back through the candidate ports until one answers.
+   */
   async verifyTransport(): Promise<{ ok: boolean; checkedAt: string; error?: string }> {
-    if (!this.transporter) {
+    const mail = this.config.values.mail;
+    if (mail.driver !== 'smtp') {
       this.verifyState = { ok: false, checkedAt: new Date().toISOString(), error: 'No SMTP transport configured' };
       return this.verifyState;
     }
-    try {
-      await this.transporter.verify();
-      this.verifyState = { ok: true, checkedAt: new Date().toISOString() };
-      this.logger.log(`SMTP ready — ${this.config.values.mail.host}:${this.config.values.mail.port}`);
-    } catch (error) {
-      const err = error as Error & { code?: string };
-      this.verifyState = {
-        ok: false,
-        checkedAt: new Date().toISOString(),
-        error: `${err.code ? `${err.code}: ` : ''}${err.message}`,
-      };
-      this.logger.error(`SMTP verify failed — ${this.verifyState.error}`);
+
+    this.portReport = [];
+    for (const { port, secure } of this.candidatePorts()) {
+      const candidate = this.build(port, secure);
+      try {
+        await candidate.verify();
+        this.transporter = candidate;
+        this.activePort = port;
+        this.portReport.push({ port, secure, ok: true });
+        this.verifyState = { ok: true, checkedAt: new Date().toISOString() };
+        this.logger.log(`SMTP ready — ${mail.host}:${port}${port === mail.port ? '' : ' (fallback port)'}`);
+        return this.verifyState;
+      } catch (error) {
+        const err = error as Error & { code?: string };
+        const detail = `${err.code ? `${err.code}: ` : ''}${err.message}`;
+        this.portReport.push({ port, secure, ok: false, error: detail });
+        this.logger.warn(`SMTP port ${port} unusable — ${detail}`);
+        candidate.close();
+      }
     }
+
+    this.transporter = null;
+    this.activePort = null;
+    this.verifyState = {
+      ok: false,
+      checkedAt: new Date().toISOString(),
+      error: `No usable SMTP port. Tried ${this.portReport.map((p) => p.port).join(', ')} against ${mail.host}.`,
+    };
+    this.logger.error(this.verifyState.error);
     return this.verifyState;
+  }
+
+  /** Per-port results from the last handshake sweep. */
+  portResults(): Array<{ port: number; secure: boolean; ok: boolean; error?: string }> {
+    return [...this.portReport];
+  }
+
+  /** Lazily establishes a working transport, so a send can recover on its own. */
+  private async ensureTransport(): Promise<Transporter | null> {
+    if (this.transporter) return this.transporter;
+    if (this.config.values.mail.driver !== 'smtp') return null;
+    await this.verifyTransport();
+    return this.transporter;
   }
 
   private record(attempt: MailAttempt): MailAttempt {
@@ -128,19 +197,19 @@ export class MailService implements OnModuleInit {
     const { mail } = this.config.values;
     const from = `"${mail.fromName}" <${mail.fromAddress}>`;
     const base = { at: new Date().toISOString(), subject, recipientDomain: recipientDomain(to) };
+    const transporter = await this.ensureTransport();
 
-    if (!this.transporter) {
+    if (!transporter) {
+      const reason =
+        mail.driver === 'smtp'
+          ? `No usable SMTP port to ${mail.host} (tried ${this.portResults().map((p) => p.port).join(', ') || 'none'})`
+          : 'MAIL_DRIVER=log — message was logged, not delivered';
       this.logger.log(`[mail:log] to=${to} subject="${subject}"\n${text}`);
-      return this.record({
-        ...base,
-        driver: 'log',
-        ok: false,
-        error: 'MAIL_DRIVER=log — message was logged, not delivered',
-      });
+      return this.record({ ...base, driver: 'log', ok: false, error: reason });
     }
 
     try {
-      const info = (await this.transporter.sendMail({ from, to, subject, html, text })) as {
+      const info = (await transporter.sendMail({ from, to, subject, html, text })) as {
         messageId?: string;
         response?: string;
         accepted?: unknown[];
@@ -200,6 +269,7 @@ export class MailService implements OnModuleInit {
       /** Brevo only relays for a sender it has verified — worth seeing. */
       fromDomain: recipientDomain(m.fromAddress),
       transportReady: this.transporter !== null,
+      activePort: this.activePort,
     };
   }
 
