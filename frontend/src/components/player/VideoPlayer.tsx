@@ -290,10 +290,15 @@ export function VideoPlayer({
 
   // -- Controls visibility ---------------------------------------------------
 
+  /** True while the pointer rests on the control bar — never hide under it. */
+  const overControlsRef = useRef(false);
+  /** Kind of pointer behind the last press, so a touch tap can mean "show controls". */
+  const pointerTypeRef = useRef<string>('mouse');
+
   const revealControls = useCallback(() => {
     setControlsVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    if (state.phase === 'playing' && !settingsOpen) {
+    if (state.phase === 'playing' && !settingsOpen && !overControlsRef.current) {
       hideTimerRef.current = setTimeout(() => setControlsVisible(false), CONTROLS_HIDE_DELAY);
     }
   }, [state.phase, settingsOpen]);
@@ -509,12 +514,32 @@ export function VideoPlayer({
         'player-root group relative w-full overflow-hidden bg-black',
         state.isFullscreen ? '' : 'aspect-video rounded-xl',
         lightsOff && 'ring-2 ring-brand/40',
+        // Hide the cursor along with the controls while watching.
+        started && !controlsVisible && state.phase === 'playing' && 'cursor-none',
       )}
-      onMouseMove={revealControls}
+      onPointerDown={(e) => {
+        pointerTypeRef.current = e.pointerType;
+      }}
+      onPointerMove={(e) => {
+        // A finger dragging across the screen is not "the mouse moved".
+        if (e.pointerType !== 'touch') revealControls();
+      }}
       onMouseLeave={() => state.phase === 'playing' && !settingsOpen && setControlsVisible(false)}
       onClick={() => {
         if (settingsOpen) {
           setSettingsOpen(false);
+          return;
+        }
+        // Touch has no hover, so a tap on the picture toggles the controls
+        // (as in every mobile player) instead of pausing — play/pause is the
+        // button in the bar.
+        if (pointerTypeRef.current === 'touch' && started && !adState.playing) {
+          if (controlsVisible && state.phase === 'playing') {
+            if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+            setControlsVisible(false);
+          } else {
+            revealControls();
+          }
           return;
         }
         if (started && !adState.playing) actions.togglePlay();
@@ -810,6 +835,21 @@ export function VideoPlayer({
           adState.playing && 'hidden',
         )}
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          // Touch produces no hover/move, so any tap on the bar restarts the
+          // hide timer rather than letting it hide mid-interaction.
+          if (e.pointerType === 'touch') revealControls();
+        }}
+        onPointerEnter={(e) => {
+          if (e.pointerType === 'touch') return;
+          overControlsRef.current = true;
+          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType === 'touch') return;
+          overControlsRef.current = false;
+          revealControls();
+        }}
       >
         {/* Seek bar */}
         <div className="group/seek relative mb-1.5 px-1">

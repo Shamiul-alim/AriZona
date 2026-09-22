@@ -434,7 +434,14 @@ export function useVideoPlayer({
     if (!container) return;
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await container.requestFullscreen();
+      else if (typeof container.requestFullscreen === 'function') await container.requestFullscreen();
+      else {
+        // iPhone Safari has no element Fullscreen API; it only lets the <video>
+        // itself go fullscreen, using the system's native controls. Without
+        // this fallback the fullscreen button silently did nothing there.
+        const video = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+        video?.webkitEnterFullscreen?.();
+      }
     } catch {
       // Fullscreen can be blocked by permissions policy; ignore quietly.
     }
