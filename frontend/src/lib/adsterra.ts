@@ -93,3 +93,91 @@ export function popunderGateCss(placementKey: string): string {
     '{display:none!important;pointer-events:none!important}'
   );
 }
+
+/* -------------------------------------------------------------------------
+ * Direct Link click ad
+ *
+ * A second, independent mechanism: on an ordinary navigation click we open the
+ * Adsterra Direct Link in another tab and let the click proceed, so the visitor
+ * still gets where they were going. Reference sites (fojik.site) open the ad
+ * and swallow the navigation — measured: 4 clicks, 4 ads, 0 navigations. We
+ * keep the navigation; only the rate is limited.
+ * ---------------------------------------------------------------------- */
+
+/** Nothing inside these may ever open a click ad. */
+const CLICK_AD_FORBIDDEN = [
+  '.player-root', // the whole video player: controls, seek bar, menus
+  'form',
+  'input',
+  'textarea',
+  'select',
+  'label',
+  'aside[aria-label="Advertisement"]',
+  '[data-no-ad]',
+  '[role="dialog"]',
+  '[role="menu"]',
+].join(',');
+
+export interface ClickAdTarget {
+  eligible: boolean;
+  /** Why it was refused, for the diagnostic report. */
+  reason?: string;
+  href?: string;
+}
+
+/**
+ * Decides whether a clicked element is an ordinary content/navigation click.
+ *
+ * Only same-origin links (cards, posters, titles, genres, pagination, search
+ * results, nav) and elements explicitly marked `data-click-ad` qualify. Form
+ * fields, dialogs, our own ad units and the entire player subtree never do.
+ */
+export function clickAdTarget(element: Element | null): ClickAdTarget {
+  if (!element) return { eligible: false, reason: 'no target' };
+  if (element.closest(CLICK_AD_FORBIDDEN)) return { eligible: false, reason: 'inside an excluded region' };
+
+  const marked = element.closest('[data-click-ad]');
+  const anchor = element.closest('a[href]') as HTMLAnchorElement | null;
+  if (!anchor) return marked ? { eligible: true } : { eligible: false, reason: 'not a link' };
+
+  const href = anchor.getAttribute('href') ?? '';
+  if (anchor.hasAttribute('download')) return { eligible: false, reason: 'download link' };
+  // Opening in a new tab is the visitor's own intent; leave it alone.
+  if (anchor.target && anchor.target !== '_self') return { eligible: false, reason: 'opens in a new tab' };
+  if (/^(javascript|mailto|tel):/i.test(href)) return { eligible: false, reason: 'not a navigation link' };
+  if (href.startsWith('#')) return { eligible: false, reason: 'same-page anchor' };
+  if (anchor.origin !== window.location.origin) return { eligible: false, reason: 'external link' };
+
+  return { eligible: true, href: `${anchor.pathname}${anchor.search}` };
+}
+
+/** A plain left-click by a real person, not a command to open a new tab. */
+export function isPlainPrimaryClick(event: MouseEvent): boolean {
+  return (
+    event.isTrusted && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+  );
+}
+
+export interface ClickAdContext {
+  enabled: boolean;
+  pathname: string;
+  status: SessionStatus;
+  role: UserRole | null;
+  excludedRoutes: readonly string[];
+  lastClickAdAt: number | null;
+  cooldownMs: number;
+  now: number;
+  /** Another mechanism already opened a window for this same interaction. */
+  adAlreadyOpenedInGesture: boolean;
+}
+
+/** Whether a click ad may open right now, ignoring what was clicked. */
+export function mayOpenClickAd(c: ClickAdContext): boolean {
+  if (!c.enabled) return false;
+  if (c.status === 'idle' || c.status === 'loading') return false;
+  if (isStaff(c.role)) return false;
+  if (isRouteExcluded(c.pathname, c.excludedRoutes)) return false;
+  // One interaction never produces two advertiser windows.
+  if (c.adAlreadyOpenedInGesture) return false;
+  return cooldownRemaining(c.lastClickAdAt, c.cooldownMs, c.now) === 0;
+}

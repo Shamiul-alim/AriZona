@@ -4,6 +4,7 @@ import { SITE_NAME, SITE_TAGLINE, SITE_URL } from '@/lib/config';
 import { Providers } from '@/components/Providers';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { SiteFooter } from '@/components/layout/SiteFooter';
+import { AdsterraClickAd } from '@/components/ads/AdsterraClickAd';
 import { AdsterraPopunder } from '@/components/ads/AdsterraPopunder';
 import './globals.css';
 
@@ -65,8 +66,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </main>
             <SiteFooter />
           </div>
-          {/* Renders nothing; arms the Adsterra popunder outside /admin and /auth. */}
+          {/* Both render nothing. The popunder arms the vendor script outside
+              /admin, /auth and /watch; the click ad opens the Direct Link on an
+              ordinary navigation click. They coordinate through lib/ad-runtime
+              so one interaction never opens two advertiser windows. */}
           <AdsterraPopunder />
+          <AdsterraClickAd />
         </Providers>
       </body>
     </html>

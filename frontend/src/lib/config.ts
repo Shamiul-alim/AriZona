@@ -130,6 +130,14 @@ function flag(raw: string | undefined, inherit: boolean): boolean {
 
 const adsterraEnabled = process.env.NEXT_PUBLIC_ADSTERRA_ENABLED === 'true';
 const popunderSrc = adScriptUrl(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_SRC);
+/**
+ * Adsterra Direct Link. Like the placement keys below it is public
+ * configuration: it is a plain URL that every visitor's browser is given.
+ */
+const directLinkUrl = adScriptUrl(
+  process.env.NEXT_PUBLIC_ADSTERRA_DIRECT_LINK ??
+    'https://www.profitableratecpmnetwork.com/v08ttshhc?key=421f36ed2d60a1f02cba30d7db040223',
+);
 
 /**
  * The single place that decides what advertising runs where.
@@ -166,6 +174,28 @@ export const ADSTERRA = {
      * player — and cannot be told to leave the controls alone.
      */
     excludedRoutes: routeList(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_EXCLUDED_ROUTES, ['/auth', '/admin', '/watch']),
+  },
+
+  /**
+   * Direct Link click ad — a second mechanism, independent of the popunder.
+   *
+   * On an ordinary navigation click the Direct Link opens in another tab and
+   * the click is left alone, so the visitor still reaches the page they asked
+   * for. The two mechanisms share `lib/ad-runtime.ts`, so a single interaction
+   * can never produce both a popunder and a click ad.
+   */
+  clickAd: {
+    enabled:
+      flag(process.env.NEXT_PUBLIC_ADSTERRA_CLICK_AD_ENABLED, adsterraEnabled) && Boolean(directLinkUrl),
+    url: directLinkUrl,
+    /** Minimum gap between two click ads in one browser, in seconds. */
+    cooldownSeconds: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_CLICK_AD_COOLDOWN_SECONDS, 5),
+    /**
+     * /watch is NOT excluded: the click ad adds no overlay and never sees a
+     * click inside the player, because the whole `.player-root` subtree is
+     * refused in `clickAdTarget`. Add it here to switch the watch page off.
+     */
+    excludedRoutes: routeList(process.env.NEXT_PUBLIC_ADSTERRA_CLICK_AD_EXCLUDED_ROUTES, ['/auth', '/admin']),
   },
 
   /**

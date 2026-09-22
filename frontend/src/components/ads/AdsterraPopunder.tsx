@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ADSTERRA } from '@/lib/config';
 import { cooldownRemaining, isPopunderActive, popunderGateCss, shouldLoadPopunder } from '@/lib/adsterra';
 import { useAuthStore } from '@/lib/auth-store';
+import { lastAdAt, markAdOpened } from '@/lib/ad-runtime';
 
 /**
  * The Adsterra popunder, integrated so that it monetises without breaking the
@@ -22,26 +23,13 @@ import { useAuthStore } from '@/lib/auth-store';
  *     or work around it, and we never open or count an ad ourselves.
  */
 
-const LAST_POP_KEY = 'anizora.adsterra.lastPop';
-
 /** One vendor script per document, however many route changes happen. */
 let injected = false;
 
 function readLastPop(): number | null {
-  try {
-    const raw = window.localStorage.getItem(LAST_POP_KEY);
-    return raw ? Number(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeLastPop(at: number): void {
-  try {
-    window.localStorage.setItem(LAST_POP_KEY, String(at));
-  } catch {
-    /* storage unavailable: the in-memory state below still spaces ads out */
-  }
+  // Shared with the Direct Link click ad, so neither can fire twice on one
+  // interaction; see lib/ad-runtime.ts.
+  return lastAdAt('popunder') || null;
 }
 
 /** True for the vendor's layer link or anything inside it. */
@@ -231,7 +219,7 @@ export function AdsterraPopunder() {
     onVendorAttempt = (x, y, opened) => {
       const at = Date.now();
       if (opened) {
-        writeLastPop(at);
+        markAdOpened('popunder', at);
         setLastPopAt(at);
         document.documentElement.dataset.popunder = 'off';
       }
