@@ -363,6 +363,9 @@ export function VideoPlayer({
           return;
         case 'escape':
           if (settingsOpen) return handled(() => setSettingsOpen(false));
+          // Browsers normally consume Escape to leave fullscreen before the page
+          // sees it; if it does reach us, do the same rather than ignore it.
+          if (document.fullscreenElement) return handled(() => void actions.toggleFullscreen());
           return;
         default:
           break;
