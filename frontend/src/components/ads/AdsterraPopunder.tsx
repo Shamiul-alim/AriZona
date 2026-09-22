@@ -19,6 +19,18 @@ import { useAuthStore } from '@/lib/auth-store';
  * behaviour, which is what keeps this a supported integration rather than a
  * home-made redirect.
  *
+ * FREQUENCY
+ * ---------
+ * Adsterra caps impressions itself, via a `pp_main_<placement>` cookie it sets
+ * and the frequency configured on the placement. We therefore do NOT impose a
+ * second cap by default. An earlier version marked this browser as "armed" the
+ * moment the script tag was appended — before the vendor had decided whether to
+ * show anything — which spent a 12-hour cooldown on every first page view and
+ * meant the script was usually never loaded again. The marker is now written
+ * only once the vendor script has actually loaded, and only matters at all if
+ * an operator sets NEXT_PUBLIC_ADSTERRA_FREQUENCY_HOURS to impose an extra
+ * ceiling of their own.
+ *
  * Every rule about *when* it may arm lives in `shouldArmPopunder`, which is
  * unit-tested. This component only gathers the inputs and injects the script.
  * It renders nothing, and injects at most once per page load, so it cannot
@@ -48,23 +60,59 @@ function markArmed(): void {
   }
 }
 
+/**
+ * Opt-in diagnostics: add `?addebug=1` to any URL to have the decision printed
+ * to the console and mirrored on `window.__anizoraAds`. Nothing is reported
+ * unless asked for, and it carries no account or credential data — only the
+ * placement URL, which is public in the page source anyway.
+ */
+function report(state: Record<string, unknown>): void {
+  if (typeof window === 'undefined') return;
+  let wanted = false;
+  try {
+    wanted = new URLSearchParams(window.location.search).has('addebug');
+  } catch {
+    wanted = false;
+  }
+  (window as unknown as { __anizoraAds?: unknown }).__anizoraAds = state;
+  if (wanted) console.info('[anizora:ads]', state);
+}
+
 export function AdsterraPopunder() {
   const pathname = usePathname();
   const status = useAuthStore((s) => s.status);
   const role = useAuthStore((s) => s.user?.role ?? null);
 
   useEffect(() => {
-    const allowed = shouldArmPopunder({
+    const lastArmedAt = readLastArmed();
+    const context = {
       enabled: ADSTERRA.enabled,
       scriptSrc: ADSTERRA.popunderSrc,
       pathname,
       status,
       role,
-      lastArmedAt: readLastArmed(),
+      lastArmedAt,
       frequencyHours: ADSTERRA.frequencyHours,
       now: Date.now(),
       alreadyInjected: injected,
+    };
+    const allowed = shouldArmPopunder(context);
+
+    report({
+      adsEnabled: ADSTERRA.enabled,
+      scriptConfigured: Boolean(ADSTERRA.popunderSrc),
+      scriptUrl: ADSTERRA.popunderSrc || null,
+      route: pathname,
+      routeExcluded: /^\/(admin|auth)(\/|$)/.test(pathname),
+      sessionStatus: status,
+      staffExcluded: Boolean(role && role !== 'USER'),
+      extraCooldownHours: ADSTERRA.frequencyHours || 'disabled (Adsterra decides)',
+      lastLoadedAt: lastArmedAt ? new Date(lastArmedAt).toISOString() : null,
+      alreadyInjectedThisPageLoad: injected,
+      willInject: allowed,
+      scriptLoaded: false,
     });
+
     if (!allowed) return;
 
     try {
@@ -73,14 +121,20 @@ export function AdsterraPopunder() {
       script.async = true;
       script.dataset.cfasync = 'false';
       script.referrerPolicy = 'no-referrer-when-downgrade';
+      script.onload = () => {
+        // Only now has the vendor actually taken over: record the load, so an
+        // optional operator-imposed ceiling measures something real.
+        markArmed();
+        report({ ...context, willInject: true, scriptLoaded: true });
+      };
       script.onerror = () => {
-        // A blocked or failed script must never break the page; allow a retry
-        // on a later navigation.
+        // Blocked by an extension or a network failure. Never break the page,
+        // and allow a retry on a later navigation rather than burning a slot.
         injected = false;
+        report({ ...context, willInject: true, scriptLoaded: false, blocked: true });
       };
       document.body.appendChild(script);
       injected = true;
-      markArmed();
     } catch {
       injected = false;
     }

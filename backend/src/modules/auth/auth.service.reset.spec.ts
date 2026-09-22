@@ -25,7 +25,12 @@ describe('AuthService password reset by code', () => {
       refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
       $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
     };
-    const mail = { sendPasswordResetCode: jest.fn().mockResolvedValue(undefined) };
+    const mail = {
+      // send() reports the delivery outcome rather than throwing, so the
+      // service can log a failure the caller is never told about.
+      sendPasswordResetCode: jest.fn().mockResolvedValue({ ok: true, driver: 'smtp' }),
+      sendGoogleAccountNotice: jest.fn().mockResolvedValue({ ok: true, driver: 'smtp' }),
+    };
     const config = { values: { bcryptRounds: 4, siteName: 'AniZora', siteUrl: 'https://example.test' } };
     const service = new AuthService(prisma as never, {} as never, mail as never, {} as never, config as never);
     return { service, prisma, mail };
@@ -55,6 +60,39 @@ describe('AuthService password reset by code', () => {
       // The raw code must never reach the database.
       expect(JSON.stringify(args.data)).not.toContain(code);
       expect(args.data.tokenHash).toBe(sha256(`${USER.id}:${code}`));
+    });
+
+    it('never mints a code for a Google-only account', async () => {
+      // There is no password to reset, and issuing a code would let inbox
+      // access attach a password credential to an account that has none.
+      const googleOnly = { ...USER, passwordHash: null, googleId: 'g-123' };
+      const { service, prisma, mail } = setup(null, googleOnly as never);
+
+      await service.forgotPassword(googleOnly.email);
+
+      expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+      expect(mail.sendPasswordResetCode).not.toHaveBeenCalled();
+      // Instead they are pointed at the sign-in method that works.
+      expect(mail.sendGoogleAccountNotice).toHaveBeenCalledTimes(1);
+    });
+
+    it('still resets a local account that has also linked Google', async () => {
+      const linked = { ...USER, passwordHash: 'bcrypt-hash', googleId: 'g-123' };
+      const { service, prisma, mail } = setup(null, linked as never);
+
+      await service.forgotPassword(linked.email);
+
+      expect(prisma.passwordResetToken.create).toHaveBeenCalledTimes(1);
+      expect(mail.sendPasswordResetCode).toHaveBeenCalledTimes(1);
+      expect(mail.sendGoogleAccountNotice).not.toHaveBeenCalled();
+    });
+
+    it('resolves normally when the provider refuses the message', async () => {
+      // The caller still gets the same 202; only the log records the failure.
+      const { service, mail } = setup();
+      mail.sendPasswordResetCode.mockResolvedValue({ ok: false, driver: 'log', error: 'MAIL_DRIVER=log' });
+
+      await expect(service.forgotPassword(USER.email)).resolves.toBeUndefined();
     });
 
     it('retires any outstanding code first', async () => {

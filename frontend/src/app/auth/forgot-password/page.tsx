@@ -6,17 +6,49 @@ import { apiFetch } from '@/lib/api';
 import { AuthShell, buttonClass, Field, inputClass } from '@/components/auth/AuthShell';
 import { cn } from '@/lib/utils';
 
-type Step = 'email' | 'code' | 'password' | 'done';
+/**
+ * Password recovery, in the shape people expect from a consumer site:
+ *
+ *   find → send → code → password → done
+ *
+ * WHY "FIND YOUR ACCOUNT" DOES NOT LOOK ANYTHING UP
+ * -------------------------------------------------
+ * A screen that answers "account found" / "no such account" is an enumeration
+ * oracle: anyone could test addresses at will. So the first step never contacts
+ * the server at all — it only checks that what was typed *looks* like an email
+ * and hands it to the next screen. The confirmation screen then states the
+ * privacy-preserving truth ("if an account exists, we'll send a code") and only
+ * on "Send verification code" is the server told anything. That request always
+ * answers 202, for every address. The flow feels like a lookup; nothing is
+ * actually revealed.
+ */
+
+type Step = 'find' | 'send' | 'code' | 'password' | 'done';
 
 /** Matches the server: a code lives ten minutes. */
 const RESEND_COOLDOWN_S = 60;
+const ORDER: Step[] = ['find', 'send', 'code', 'password'];
+
+/** Deliberately permissive — the server is the authority, this only catches typos. */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+/** Shows enough of the address to recognise it, not enough to harvest it. */
+function maskEmail(raw: string): string {
+  const value = raw.trim();
+  const at = value.lastIndexOf('@');
+  if (at < 1) return value;
+  const name = value.slice(0, at);
+  const domain = value.slice(at);
+  if (name.length <= 2) return `${name[0]}***${domain}`;
+  return `${name.slice(0, 2)}${'*'.repeat(Math.min(name.length - 2, 6))}${domain}`;
+}
+
 export default function ForgotPasswordPage() {
-  const [step, setStep] = useState<Step>('email');
+  const [step, setStep] = useState<Step>('find');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
@@ -27,6 +59,9 @@ export default function ForgotPasswordPage() {
 
   const codeRef = useRef<HTMLInputElement | null>(null);
   const passwordRef = useRef<HTMLInputElement | null>(null);
+  const sendRef = useRef<HTMLButtonElement | null>(null);
+
+  const normalised = email.trim().toLowerCase();
 
   // Countdown for the resend link.
   useEffect(() => {
@@ -37,16 +72,29 @@ export default function ForgotPasswordPage() {
 
   // Move focus to whatever the step now asks for.
   useEffect(() => {
+    if (step === 'send') sendRef.current?.focus();
     if (step === 'code') codeRef.current?.focus();
     if (step === 'password') passwordRef.current?.focus();
   }, [step]);
 
-  const requestCode = async (event?: React.FormEvent) => {
+  /** Step 1. Local validation only — nothing leaves the browser. */
+  const findAccount = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!EMAIL_SHAPE.test(normalised)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    setError(null);
+    setStep('send');
+  };
+
+  /** Step 2. The first and only request that mentions the address. */
+  const sendCode = async (event?: React.FormEvent) => {
     event?.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await apiFetch('/auth/forgot-password', { method: 'POST', body: { email: email.trim().toLowerCase() } });
+      await apiFetch('/auth/forgot-password', { method: 'POST', body: { email: normalised } });
     } catch {
       // The endpoint never reveals whether the address exists, so the UI moves
       // on either way rather than leaking that distinction.
@@ -62,10 +110,7 @@ export default function ForgotPasswordPage() {
     setBusy(true);
     setError(null);
     try {
-      await apiFetch('/auth/verify-reset-code', {
-        method: 'POST',
-        body: { email: email.trim().toLowerCase(), code },
-      });
+      await apiFetch('/auth/verify-reset-code', { method: 'POST', body: { email: normalised, code } });
       setStep('password');
     } catch (err) {
       setError(messageOf(err, 'That code is invalid or has expired.'));
@@ -79,10 +124,7 @@ export default function ForgotPasswordPage() {
     setBusy(true);
     setError(null);
     try {
-      await apiFetch('/auth/reset-password', {
-        method: 'POST',
-        body: { email: email.trim().toLowerCase(), code, password },
-      });
+      await apiFetch('/auth/reset-password', { method: 'POST', body: { email: normalised, code, password } });
       setStep('done');
     } catch (err) {
       setError(messageOf(err, 'Could not update your password. Request a new code and try again.'));
@@ -92,13 +134,17 @@ export default function ForgotPasswordPage() {
   };
 
   const copy: Record<Step, { title: string; subtitle: string }> = {
-    email: {
-      title: 'Reset your password',
-      subtitle: 'Enter your email address and we will send you a 6-digit code.',
+    find: {
+      title: 'Find your account',
+      subtitle: 'Enter the email address you use for AniZora.',
+    },
+    send: {
+      title: 'Send a verification code',
+      subtitle: `If an AniZora account exists for ${maskEmail(normalised)}, we'll send it a 6-digit code.`,
     },
     code: {
-      title: 'Check your email',
-      subtitle: `If an account exists for ${email.trim() || 'that address'}, a 6-digit code is on its way. It expires in 10 minutes.`,
+      title: 'Enter your code',
+      subtitle: `If an account exists for ${maskEmail(normalised)}, a 6-digit code is on its way. It expires in 10 minutes.`,
     },
     password: { title: 'Choose a new password', subtitle: 'Pick something you have not used here before.' },
     done: { title: 'Password updated', subtitle: 'You can now sign in with your new password.' },
@@ -125,8 +171,8 @@ export default function ForgotPasswordPage() {
         </p>
       ) : null}
 
-      {step === 'email' ? (
-        <form onSubmit={requestCode} className="space-y-4" noValidate>
+      {step === 'find' ? (
+        <form onSubmit={findAccount} className="space-y-4" noValidate>
           <Field label="Email address">
             <input
               type="email"
@@ -135,14 +181,45 @@ export default function ForgotPasswordPage() {
               required
               autoFocus
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (error) setError(null);
+              }}
               placeholder="you@example.com"
               className={inputClass}
             />
           </Field>
-          <button type="submit" disabled={busy || !email.trim()} className={buttonClass}>
-            {busy ? 'Sending code…' : 'Send code'}
+          <button type="submit" disabled={!email.trim()} className={buttonClass}>
+            Continue
           </button>
+        </form>
+      ) : null}
+
+      {step === 'send' ? (
+        <form onSubmit={sendCode} className="space-y-4" noValidate>
+          <div className="rounded-xl border border-line-soft bg-surface/50 px-4 py-3.5">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-faint">Sending to</p>
+            <p className="mt-1 break-all font-mono text-[14px] text-ink">{maskEmail(normalised)}</p>
+          </div>
+          <p className="text-[13px] leading-relaxed text-ink-muted">
+            For your privacy we don&apos;t confirm whether an account exists. If one does, the code will arrive within a
+            minute or two.
+          </p>
+          <button ref={sendRef} type="submit" disabled={busy} className={buttonClass}>
+            {busy ? 'Sending code…' : 'Send verification code'}
+          </button>
+          <p className="text-center text-[12.5px] text-ink-muted">
+            <button
+              type="button"
+              onClick={() => {
+                setStep('find');
+                setError(null);
+              }}
+              className="text-ink-soft hover:underline"
+            >
+              Use a different email
+            </button>
+          </p>
         </form>
       ) : null}
 
@@ -177,7 +254,7 @@ export default function ForgotPasswordPage() {
             ) : (
               <button
                 type="button"
-                onClick={() => void requestCode()}
+                onClick={() => void sendCode()}
                 disabled={busy}
                 className="font-semibold text-brand-bright hover:underline disabled:opacity-50"
               >
@@ -188,7 +265,7 @@ export default function ForgotPasswordPage() {
             <button
               type="button"
               onClick={() => {
-                setStep('email');
+                setStep('find');
                 setError(null);
               }}
               className="text-ink-soft hover:underline"
@@ -236,9 +313,7 @@ export default function ForgotPasswordPage() {
               <path d="m5 12.5 4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <p className="mt-4 text-[13.5px] text-ink-muted">
-            For your security, every other device has been signed out.
-          </p>
+          <p className="mt-4 text-[13.5px] text-ink-muted">For your security, every other device has been signed out.</p>
           <Link href="/auth/login" className={cn(buttonClass, 'mt-5 inline-flex justify-center')}>
             Go to sign in
           </Link>
@@ -248,13 +323,15 @@ export default function ForgotPasswordPage() {
   );
 }
 
-/** Three dots showing progress through the reset, plus a label for screen readers. */
+/** Progress through the reset, plus a label for screen readers. */
 function StepDots({ step }: { step: Step }) {
-  const order: Step[] = ['email', 'code', 'password'];
-  const current = step === 'done' ? order.length : order.indexOf(step);
+  const current = step === 'done' ? ORDER.length : ORDER.indexOf(step);
   return (
-    <div className="mb-5 flex items-center justify-center gap-2" aria-label={`Step ${Math.min(current + 1, 3)} of 3`}>
-      {order.map((name, i) => (
+    <div
+      className="mb-5 flex items-center justify-center gap-2"
+      aria-label={`Step ${Math.min(current + 1, ORDER.length)} of ${ORDER.length}`}
+    >
+      {ORDER.map((name, i) => (
         <span
           key={name}
           className={cn(

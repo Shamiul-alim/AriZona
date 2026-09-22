@@ -111,8 +111,15 @@ export function positiveNumber(raw: string | undefined, fallback: number): numbe
 export const ADSTERRA = {
   enabled: process.env.NEXT_PUBLIC_ADSTERRA_ENABLED === 'true',
   popunderSrc: adScriptUrl(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_SRC),
-  /** Hours before the same browser may arm the popunder again. */
-  frequencyHours: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_FREQUENCY_HOURS, 12),
+  /**
+   * Optional extra ceiling, in hours, on how often this browser may load the
+   * vendor script. Defaults to 0 = no extra cap, because Adsterra already
+   * enforces its own impression frequency (the `pp_main_*` cookie it sets,
+   * configured in the Adsterra dashboard). Stacking a second cap on top of
+   * that one is what previously suppressed ads entirely: our cap was spent on
+   * page load, so the vendor never got a second chance to show anything.
+   */
+  frequencyHours: positiveNumber(process.env.NEXT_PUBLIC_ADSTERRA_FREQUENCY_HOURS, 0),
 };
 
 /**

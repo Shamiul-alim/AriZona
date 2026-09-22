@@ -218,7 +218,21 @@ export class AuthService {
   async forgotPassword(email: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || user.deletedAt) {
-      this.logger.debug(`Password reset requested for unknown address ${email}`);
+      this.logger.debug('Password reset requested for an address with no account');
+      return;
+    }
+
+    // A Google-only account has no password to reset. Minting a code would
+    // let anyone with inbox access attach a password credential to an account
+    // that deliberately has none, so instead we mail a notice pointing at the
+    // sign-in method that actually works. The HTTP response is unchanged, so
+    // this stays invisible to anyone probing for registered addresses.
+    if (!user.passwordHash && user.googleId) {
+      this.logger.log(`Password reset requested for a Google-only account (user ${user.id}) — notice sent`);
+      const notice = await this.mail.sendGoogleAccountNotice(user.email, user.displayName ?? user.username);
+      if (!notice.ok) {
+        this.logger.error(`Google-account notice not delivered: ${notice.error ?? 'provider rejected the message'}`);
+      }
       return;
     }
 
@@ -240,13 +254,23 @@ export class AuthService {
       },
     });
 
-    this.logger.log(`Password reset code issued for user ${user.id}`);
-    await this.mail.sendPasswordResetCode(
+    const attempt = await this.mail.sendPasswordResetCode(
       user.email,
       user.displayName ?? user.username,
       code,
       Math.round(RESET_CODE_TTL_MS / 60000),
     );
+
+    // The caller always sees the same 202, so a delivery failure is otherwise
+    // indistinguishable from success. Record it where an operator will see it.
+    if (attempt.ok) {
+      this.logger.log(`Password reset code issued for user ${user.id} and accepted by the mail provider`);
+    } else {
+      this.logger.error(
+        `Password reset code issued for user ${user.id} but NOT delivered — ` +
+          `driver=${attempt.driver} error="${attempt.error ?? 'provider rejected the message'}"`,
+      );
+    }
   }
 
   /**
