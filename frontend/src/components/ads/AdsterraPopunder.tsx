@@ -219,6 +219,26 @@ export function AdsterraPopunder() {
     };
   }, [router]);
 
+  // A press that lands on the vendor's visible layer is recovered directly.
+  // The window.open gate below covers the case where the vendor scripts the
+  // window itself, but when its layer is armed the advert can open through the
+  // layer anchor's own target="_blank" — no window.open, so nothing above
+  // fires. Measured on production, that was the one click in twelve that kept
+  // losing its navigation, always the first click after the layer re-armed.
+  useEffect(() => {
+    if (!enabled || !key) return;
+    const onPress = (event: MouseEvent) => {
+      if (!isVendorLayer(event.target as Element | null, key)) return;
+      const urlBefore = window.location.href;
+      const { clientX, clientY } = event;
+      window.setTimeout(() => {
+        if (window.location.href === urlBefore) deliverIntendedClick(clientX, clientY, key, urlBefore, false);
+      }, 500);
+    };
+    document.addEventListener('mousedown', onPress, true);
+    return () => document.removeEventListener('mousedown', onPress, true);
+  }, [enabled, key]);
+
   // Every time the vendor tries to open a window from a press: if it opened,
   // start the cooldown; either way, make sure the visitor's click still lands.
   useEffect(() => {
