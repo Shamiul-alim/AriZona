@@ -92,7 +92,14 @@ function resolveIntent(x: number, y: number, key: string): Intent | null {
 function deliverIntendedClick(intent: Intent | null, urlBefore: string, clickArrived: boolean): void {
   if (!intent) return;
   if (intent.href) {
-    if (window.location.href === urlBefore) navigate?.(intent.href);
+    const href = intent.href;
+    if (window.location.href === urlBefore) navigate?.(href);
+    // Asked once more shortly after: the first push can be lost while the
+    // vendor's new window is taking focus. Pushing the same route twice is
+    // harmless; losing the visitor's click is not.
+    window.setTimeout(() => {
+      if (window.location.href === urlBefore) navigate?.(href);
+    }, 1400);
     return;
   }
   if (clickArrived || !intent.element) return;
