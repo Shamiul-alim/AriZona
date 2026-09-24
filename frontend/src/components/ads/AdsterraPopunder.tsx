@@ -68,7 +68,15 @@ function deliverIntendedClick(x: number, y: number, key: string, urlBefore: stri
   if (!pressed) return;
   const anchor = pressed.closest<HTMLAnchorElement>('a[href]');
   if (anchor && anchor.origin === window.location.origin && anchor.target !== '_blank') {
-    if (window.location.href === urlBefore) navigate?.(`${anchor.pathname}${anchor.search}${anchor.hash}`);
+    const href = `${anchor.pathname}${anchor.search}${anchor.hash}`;
+    if (window.location.href === urlBefore) navigate?.(href);
+    // The router is asked once more shortly after: measured on production,
+    // roughly one popunder click in twelve still lost its navigation, because
+    // the push can land while the vendor's new window is taking focus. Pushing
+    // the same route twice is harmless; losing the click is not.
+    window.setTimeout(() => {
+      if (window.location.href === urlBefore) navigate?.(href);
+    }, 1200);
     return;
   }
   if (clickArrived) return;
