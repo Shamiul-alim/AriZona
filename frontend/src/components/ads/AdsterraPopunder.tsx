@@ -54,35 +54,49 @@ function elementBeneath(x: number, y: number, key: string): HTMLElement | null {
   return (beneath as HTMLElement | undefined) ?? null;
 }
 
+/** What the visitor was pointing at, captured while the coordinates are valid. */
+interface Intent {
+  href?: string;
+  element?: HTMLElement;
+}
+
+/**
+ * Resolves the press target IMMEDIATELY, at press time.
+ *
+ * This used to be done in the delayed step, which was wrong: between the press
+ * and the recovery the page can reflow — lazily loaded images and ad frames
+ * arrive and move content — so the coordinates could by then be over something
+ * else entirely. Measured on production, that reliably cost one navigation per
+ * run: the recovery clicked a <div> where the card had been.
+ */
+function resolveIntent(x: number, y: number, key: string): Intent | null {
+  const pressed = elementBeneath(x, y, key);
+  if (!pressed) return null;
+  const anchor = pressed.closest<HTMLAnchorElement>('a[href]');
+  if (anchor && anchor.origin === window.location.origin && anchor.target !== '_blank') {
+    return { href: `${anchor.pathname}${anchor.search}${anchor.hash}` };
+  }
+  const control =
+    pressed.closest<HTMLElement>('button, input, select, textarea, label, summary, [role="button"], [role="link"], a[href]') ??
+    pressed;
+  return { element: control };
+}
+
 /**
  * Makes sure the visitor's press does what they meant, after the vendor has
  * handled it. The vendor can swallow it three ways — its layer takes the
  * press, its new window steals focus so no click follows, or it cancels the
  * click so a Next.js <Link> declines to navigate — so rather than guess which
- * happened, check the outcome:
- *  * an internal link that did not navigate is followed with the app router;
- *  * any other control that never received its click is clicked.
+ * happened, check the outcome against the intent captured at press time.
  */
-function deliverIntendedClick(x: number, y: number, key: string, urlBefore: string, clickArrived: boolean): void {
-  const pressed = elementBeneath(x, y, key);
-  if (!pressed) return;
-  const anchor = pressed.closest<HTMLAnchorElement>('a[href]');
-  if (anchor && anchor.origin === window.location.origin && anchor.target !== '_blank') {
-    const href = `${anchor.pathname}${anchor.search}${anchor.hash}`;
-    if (window.location.href === urlBefore) navigate?.(href);
-    // The router is asked once more shortly after: measured on production,
-    // roughly one popunder click in twelve still lost its navigation, because
-    // the push can land while the vendor's new window is taking focus. Pushing
-    // the same route twice is harmless; losing the click is not.
-    window.setTimeout(() => {
-      if (window.location.href === urlBefore) navigate?.(href);
-    }, 1200);
+function deliverIntendedClick(intent: Intent | null, urlBefore: string, clickArrived: boolean): void {
+  if (!intent) return;
+  if (intent.href) {
+    if (window.location.href === urlBefore) navigate?.(intent.href);
     return;
   }
-  if (clickArrived) return;
-  const control =
-    pressed.closest<HTMLElement>('button, input, select, textarea, label, summary, [role="button"], [role="link"], a[href]') ??
-    pressed;
+  if (clickArrived || !intent.element) return;
+  const control = intent.element;
   if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) {
     control.focus();
     return;
@@ -95,7 +109,9 @@ const PRESS_EVENTS = new Set(['mousedown', 'pointerdown', 'touchstart', 'touchen
 
 let openGateInstalled = false;
 /** Called on every press-time open attempt by the vendor, allowed or declined. */
-let onVendorAttempt: ((x: number, y: number, opened: boolean) => void) | null = null;
+let onVendorAttempt: ((intent: Intent | null, opened: boolean) => void) | null = null;
+/** The placement key, so the gate can resolve intent without React state. */
+let placementKey = '';
 
 /**
  * Gates `window.open` for press events.
@@ -123,7 +139,7 @@ function installOpenGate(): void {
     const allowed = document.documentElement.dataset.popunder === 'on';
     const opened = allowed ? nativeOpen(...args) : null;
     const point = event.touches?.[0] ?? event.changedTouches?.[0] ?? event;
-    onVendorAttempt?.(point.clientX ?? 0, point.clientY ?? 0, Boolean(opened));
+    onVendorAttempt?.(resolveIntent(point.clientX ?? 0, point.clientY ?? 0, placementKey), Boolean(opened));
     return opened;
   } as typeof window.open;
 }
@@ -230,9 +246,9 @@ export function AdsterraPopunder() {
     const onPress = (event: MouseEvent) => {
       if (!isVendorLayer(event.target as Element | null, key)) return;
       const urlBefore = window.location.href;
-      const { clientX, clientY } = event;
+      const intent = resolveIntent(event.clientX, event.clientY, key);
       window.setTimeout(() => {
-        if (window.location.href === urlBefore) deliverIntendedClick(clientX, clientY, key, urlBefore, false);
+        if (window.location.href === urlBefore) deliverIntendedClick(intent, urlBefore, false);
       }, 500);
     };
     document.addEventListener('mousedown', onPress, true);
@@ -244,7 +260,8 @@ export function AdsterraPopunder() {
   useEffect(() => {
     if (!enabled || !key) return;
     let lastAttempt = 0;
-    onVendorAttempt = (x, y, opened) => {
+    placementKey = key;
+    onVendorAttempt = (intent, opened) => {
       const at = Date.now();
       if (opened) {
         markAdOpened('popunder', at);
@@ -262,7 +279,7 @@ export function AdsterraPopunder() {
       document.addEventListener('click', seen, { capture: true, once: true });
       setTimeout(() => {
         document.removeEventListener('click', seen, { capture: true });
-        deliverIntendedClick(x, y, key, urlBefore, clickArrived);
+        deliverIntendedClick(intent, urlBefore, clickArrived);
       }, 450);
     };
     return () => {
