@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { AuthShell, buttonClass, Field, inputClass } from '@/components/auth/AuthShell';
+import { PasswordField } from '@/components/auth/PasswordField';
 import { cn } from '@/lib/utils';
 
 /**
@@ -52,7 +53,6 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -278,28 +278,16 @@ export default function ForgotPasswordPage() {
 
       {step === 'password' ? (
         <form onSubmit={setNewPassword} className="space-y-4" noValidate>
-          <Field label="New password" hint="At least 8 characters, with an uppercase letter and a number.">
-            <div className="relative">
-              <input
-                ref={passwordRef}
-                type={showPassword ? 'text' : 'password'}
-                name="new-password"
-                autoComplete="new-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={cn(inputClass, 'pr-20')}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                aria-pressed={showPassword}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2.5 py-1 text-[12px] font-semibold text-ink-muted transition hover:bg-white/8 hover:text-ink"
-              >
-                {showPassword ? 'Hide' : 'Show'}
-              </button>
-            </div>
-          </Field>
+          <PasswordField
+            label="New password"
+            hint="At least 8 characters, with an uppercase letter and a number."
+            value={password}
+            onChange={setPassword}
+            autoComplete="new-password"
+            name="new-password"
+            required
+            inputRef={passwordRef}
+          />
           <button type="submit" disabled={busy || password.length < 8} className={buttonClass}>
             {busy ? 'Updating…' : 'Update password'}
           </button>

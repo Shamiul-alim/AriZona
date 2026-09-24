@@ -150,6 +150,14 @@ export const ADSTERRA = {
   /** Master switch. Nothing Adsterra-related loads when this is off. */
   enabled: adsterraEnabled,
 
+  /**
+   * Routes where no advertising code is mounted at all — not the vendor
+   * script, not the click listener, not a banner. The admin panel is a tool,
+   * never a surface for ads, and this is enforced before any per-mechanism
+   * rule gets a chance to be wrong.
+   */
+  neverRoutes: routeList(process.env.NEXT_PUBLIC_ADS_NEVER_ROUTES, ['/admin']),
+
   popunder: {
     enabled: flag(process.env.NEXT_PUBLIC_ADSTERRA_POPUNDER_ENABLED, adsterraEnabled) && Boolean(popunderSrc),
     src: popunderSrc,

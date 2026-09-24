@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { PUBLIC_API_URL } from '@/lib/config';
 import { postLoginPath } from '@/lib/auth-redirect';
+import { PasswordField } from './PasswordField';
 import { buttonClass, Field, inputClass } from './AuthShell';
 
 export function LoginForm() {
@@ -63,17 +64,7 @@ export function LoginForm() {
         />
       </Field>
 
-      <Field label="Password">
-        <input
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-          className={inputClass}
-        />
-      </Field>
+      <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" required />
 
       <div className="flex items-center justify-between">
         <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-soft">

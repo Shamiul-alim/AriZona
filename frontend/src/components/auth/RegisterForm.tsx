@@ -7,6 +7,7 @@ import { useAuthStore } from '@/lib/auth-store';
 import { PUBLIC_API_URL } from '@/lib/config';
 import { postLoginPath } from '@/lib/auth-redirect';
 import { cn } from '@/lib/utils';
+import { PasswordField } from './PasswordField';
 import { buttonClass, Field, inputClass } from './AuthShell';
 
 /** Mirrors the server-side rule so the user is not surprised by a 400. */
@@ -89,17 +90,7 @@ export function RegisterForm() {
         />
       </Field>
 
-      <Field label="Password">
-        <input
-          type="password"
-          autoComplete="new-password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-          className={inputClass}
-        />
-      </Field>
+      <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" required />
 
       <ul className="grid grid-cols-2 gap-1.5">
         {RULES.map((rule, index) => (

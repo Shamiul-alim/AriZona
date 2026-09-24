@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clickAdTarget, isPlainPrimaryClick, mayOpenClickAd, type ClickAdContext } from './adsterra';
+import { clickAdTarget, isPlainPrimaryClick, isRouteExcluded, mayOpenClickAd, type ClickAdContext } from './adsterra';
+import { ADSTERRA } from './config';
 import { adOpenedInThisGesture, lastAdAt, markAdOpened, resetAdRuntime, SAME_GESTURE_MS } from './ad-runtime';
 
 const NOW = 1_800_000_000_000;
@@ -159,5 +160,24 @@ describe('ad-runtime coordination', () => {
     markAdOpened('click', NOW);
     resetAdRuntime(); // as if the page had been reloaded
     expect(lastAdAt('click')).toBe(NOW);
+  });
+});
+
+describe('admin is never an advertising surface', () => {
+  it('is listed as a route where nothing ad-related mounts', () => {
+    expect(ADSTERRA.neverRoutes).toContain('/admin');
+  });
+
+  it('matches every admin page, and nothing that merely looks like one', () => {
+    for (const path of ['/admin', '/admin/anime', '/admin/anime/123', '/admin/users']) {
+      expect(isRouteExcluded(path, ADSTERRA.neverRoutes), path).toBe(true);
+    }
+    expect(isRouteExcluded('/administrators', ADSTERRA.neverRoutes)).toBe(false);
+  });
+
+  it('is also refused by each mechanism on its own', () => {
+    expect(mayOpenClickAd(ctx({ pathname: '/admin/anime' }))).toBe(false);
+    expect(ADSTERRA.popunder.excludedRoutes).toContain('/admin');
+    expect(ADSTERRA.banners.excludedRoutes).toContain('/admin');
   });
 });
