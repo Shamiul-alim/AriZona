@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 import { AdsterraClickAd } from './AdsterraClickAd';
 import { AdsterraPopunder } from './AdsterraPopunder';
 import { isRouteExcluded } from '@/lib/adsterra';
@@ -19,7 +20,17 @@ import { ADSTERRA } from '@/lib/config';
  */
 export function AdsMount() {
   const pathname = usePathname();
-  if (isRouteExcluded(pathname, ADSTERRA.neverRoutes)) return null;
+  const blocked = isRouteExcluded(pathname, ADSTERRA.neverRoutes);
+
+  // Unmounting stops our code running, but the vendor's layer and the gate
+  // attribute are plain DOM left over from the public page we navigated from.
+  // If that attribute still said "on", the layer would remain clickable over
+  // the admin UI. Force it shut whenever we are on a blocked route.
+  useEffect(() => {
+    if (blocked) document.documentElement.dataset.popunder = 'off';
+  }, [blocked, pathname]);
+
+  if (blocked) return null;
 
   return (
     <>
