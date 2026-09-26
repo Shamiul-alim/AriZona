@@ -30,10 +30,12 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { MediaProviderRegistry } from '../media/media-provider.registry';
 import { AdminAnimeService } from './admin-anime.service';
 import { AdminEpisodesService } from './admin-episodes.service';
+import { AdminSeasonsService } from './admin-seasons.service';
 import { AdminTaxonomyService } from './admin-taxonomy.service';
 import { AdminUsersService } from './admin-users.service';
 import { AdminAnimeQueryDto, CreateAnimeDto, UpdateAnimeDto } from './dto/admin-anime.dto';
 import { CreateEpisodeDto, UpdateEpisodeDto } from './dto/admin-episode.dto';
+import { AssignEpisodesDto, UpdateSeasonDto, UpsertSeasonDto } from './dto/admin-season.dto';
 
 class SetRoleDto {
   @IsEnum(UserRole) role!: UserRole;
@@ -91,6 +93,7 @@ export class AdminController {
     private readonly episodesService: AdminEpisodesService,
     private readonly usersService: AdminUsersService,
     private readonly taxonomy: AdminTaxonomyService,
+    private readonly seasonsService: AdminSeasonsService,
     private readonly analytics: AnalyticsService,
     private readonly mediaRegistry: MediaProviderRegistry,
   ) {}
@@ -106,6 +109,39 @@ export class AdminController {
       this.analytics.popularAnime(8),
     ]);
     return { stats, viewSeries: series, popularAnime: popular, mediaProviders: this.mediaRegistry.status() };
+  }
+
+  // --- Seasons --------------------------------------------------------------
+
+  @Get('anime/:animeId/seasons')
+  @ApiOperation({ summary: 'Seasons of one anime, with episode counts' })
+  listSeasons(@Param('animeId', ParseUUIDPipe) animeId: string) {
+    return this.seasonsService.list(animeId);
+  }
+
+  @Post('seasons')
+  @ApiOperation({ summary: 'Create or update a season by (anime, number) — safe to re-run' })
+  upsertSeason(@Body() dto: UpsertSeasonDto) {
+    return this.seasonsService.upsert(dto);
+  }
+
+  @Put('seasons/:id')
+  @ApiOperation({ summary: 'Rename or renumber a season' })
+  updateSeason(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSeasonDto) {
+    return this.seasonsService.update(id, dto);
+  }
+
+  @Post('seasons/:id/episodes')
+  @ApiOperation({ summary: 'Attach episodes to a season' })
+  assignSeasonEpisodes(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AssignEpisodesDto) {
+    return this.seasonsService.assignEpisodes(id, dto.episodeIds);
+  }
+
+  @Delete('seasons/:id')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Delete a season. Its episodes are detached, never deleted.' })
+  removeSeason(@Param('id', ParseUUIDPipe) id: string) {
+    return this.seasonsService.remove(id);
   }
 
   // --- Anime ----------------------------------------------------------------
