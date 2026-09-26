@@ -24,7 +24,12 @@ export default function LoginPage() {
         </>
       }
     >
-      <Suspense fallback={<div className="skeleton h-64 rounded-lg" />}>
+      {/* The form needs useSearchParams, so it only appears at hydration. The
+          fallback therefore has to be exactly as tall as the form's initial
+          state (measured: 350px, identical at every width) — the column is
+          vertically centered, so any mismatch moves the whole page, not just
+          the card. Re-measure this if a field is added or removed. */}
+      <Suspense fallback={<div className="skeleton h-[350px] rounded-lg" />}>
         <LoginForm />
       </Suspense>
     </AuthShell>

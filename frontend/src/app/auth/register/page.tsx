@@ -24,7 +24,11 @@ export default function RegisterPage() {
         </>
       }
     >
-      <Suspense fallback={<div className="skeleton h-72 rounded-lg" />}>
+      {/* Exactly as tall as the form's initial state, so the vertically
+          centered column does not jump when the form hydrates. Below 430px the
+          username hint and one password rule each wrap to a second line, which
+          is the 36px difference. Re-measure if a field is added or removed. */}
+      <Suspense fallback={<div className="skeleton h-[548px] min-[430px]:h-[512px] rounded-lg" />}>
         <RegisterForm />
       </Suspense>
     </AuthShell>
