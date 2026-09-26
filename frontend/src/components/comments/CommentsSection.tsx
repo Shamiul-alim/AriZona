@@ -380,13 +380,22 @@ export function CommentsSection({ animeSlug, episodeId, title = 'Comments' }: Co
         </div>
       )}
 
-      <div className="mt-4 divide-y divide-line-soft">
+      {/* While there is nothing to show, the block keeps one height for both the
+          skeleton and the empty message. Otherwise the skeleton (three cards)
+          collapsed into a one-line empty state and yanked the footer up the
+          page — measured as most of this page's layout shift. Once real
+          comments exist the reservation is dropped, so nothing adds blank
+          space to a populated thread. */}
+      <div
+        className={cn(
+          'mt-4 divide-y divide-line-soft',
+          comments.length === 0 && 'grid min-h-[16.5rem] content-center',
+        )}
+      >
         {loading && comments.length === 0 ? (
           Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton my-3 h-20 rounded-xl" />)
         ) : comments.length === 0 ? (
-          <p className="py-10 text-center text-[13.5px] text-ink-faint">
-            No comments yet. Be the first to say something.
-          </p>
+          <p className="text-center text-[13.5px] text-ink-faint">No comments yet. Be the first to say something.</p>
         ) : (
           comments.map((comment) => renderComment(comment))
         )}
