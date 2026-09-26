@@ -93,7 +93,7 @@ describe('clickAdTarget', () => {
       <form><input id="search" type="search"><button id="submit">Go</button></form>
       <label id="lab">Remember me</label>
       <select id="sel"></select>
-      <aside aria-label="Advertisement"><a href="/anime/x" id="inad">ad</a></aside>
+      <div data-ad-slot><a href="/anime/x" id="inad">ad</a></div>
       <div data-no-ad><a href="/anime/y" id="opted">no</a></div>
       <div role="dialog"><a href="/anime/z" id="dlg">dialog link</a></div>`);
     for (const id of ['search', 'submit', 'lab', 'sel', 'inad', 'opted', 'dlg']) {

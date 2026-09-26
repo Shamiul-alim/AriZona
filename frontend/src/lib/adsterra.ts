@@ -112,7 +112,7 @@ const CLICK_AD_FORBIDDEN = [
   'textarea',
   'select',
   'label',
-  'aside[aria-label="Advertisement"]',
+  '[data-ad-slot]',
   '[data-no-ad]',
   '[role="dialog"]',
   '[role="menu"]',

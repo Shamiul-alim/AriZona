@@ -32,7 +32,7 @@ export function EpisodeCard({ episode }: { episode: LatestEpisode }) {
             <span className="rounded bg-accent/90 px-1.5 py-0.5 text-[10px] font-bold text-[#04221f]">SUB</span>
           ) : null}
           {episode.hasDub ? (
-            <span className="rounded bg-hot/90 px-1.5 py-0.5 text-[10px] font-bold text-white">DUB</span>
+            <span className="rounded bg-hot-deep px-1.5 py-0.5 text-[10px] font-bold text-white">DUB</span>
           ) : null}
         </div>
 

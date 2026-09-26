@@ -122,11 +122,11 @@ export function AdsterraBanner({ layout, className }: AdsterraBannerProps) {
   if (!allowed) return null;
 
   return (
-    <aside className={cn('w-full', className)} aria-label="Advertisement">
+    <div data-ad-slot className={cn('w-full', className)}>
       <p className="mb-1 text-center text-[10px] uppercase tracking-wider text-ink-faint">Advertisement</p>
       <div ref={boxRef} className={cn('flex w-full items-center justify-center overflow-hidden', box)}>
         {size ? <BannerFrame size={size} /> : null}
       </div>
-    </aside>
+    </div>
   );
 }

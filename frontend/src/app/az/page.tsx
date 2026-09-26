@@ -53,6 +53,7 @@ export default async function AzPage({ searchParams }: { searchParams: Promise<S
         <AzStrip active={letter} />
       </div>
 
+      <h2 className="sr-only">Results</h2>
       <AnimeGrid items={results.data} priorityCount={7} emptyMessage={`No titles start with “${letter}”`} />
 
       <Pagination meta={results.meta} buildHref={buildHref} />

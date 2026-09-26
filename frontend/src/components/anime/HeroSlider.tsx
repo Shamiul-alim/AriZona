@@ -133,7 +133,7 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
                   </span>
                 ) : null}
                 {anime.dubCount > 0 ? (
-                  <span className="rounded bg-hot/90 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  <span className="rounded bg-hot-deep px-1.5 py-0.5 text-[10px] font-bold text-white">
                     DUB {anime.dubCount}
                   </span>
                 ) : null}

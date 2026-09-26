@@ -108,7 +108,7 @@ function Badge({ tone, label, value }: { tone: 'sub' | 'dub' | 'neutral'; label:
       className={cn(
         'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold backdrop-blur-sm',
         tone === 'sub' && 'bg-accent/90 text-[#04221f]',
-        tone === 'dub' && 'bg-hot/90 text-white',
+        tone === 'dub' && 'bg-hot-deep text-white',
         tone === 'neutral' && 'bg-white/20 text-ink',
       )}
     >

@@ -44,7 +44,7 @@ export function RankedList({ items }: { items: AnimeCard[] }) {
                   </span>
                 ) : null}
                 {anime.dubCount > 0 ? (
-                  <span className="rounded bg-hot/85 px-1 py-px text-[9.5px] font-bold text-white">
+                  <span className="rounded bg-hot-deep px-1 py-px text-[9.5px] font-bold text-white">
                     DUB {anime.dubCount}
                   </span>
                 ) : null}

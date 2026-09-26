@@ -138,7 +138,7 @@ function AdSenseSlot({ placementKey, format = 'leaderboard', className }: AdSlot
   }
 
   return (
-    <aside className={cn('w-full', className)} aria-label="Advertisement">
+    <div data-ad-slot className={cn('w-full', className)}>
       <p className="mb-1 text-center text-[10px] uppercase tracking-wider text-ink-faint">Advertisement</p>
       <div className={cn('overflow-hidden rounded-xl', HEIGHTS[format])}>
         <ins
@@ -152,6 +152,6 @@ function AdSenseSlot({ placementKey, format = 'leaderboard', className }: AdSlot
           {...(ADS.testMode ? { 'data-adtest': 'on' } : {})}
         />
       </div>
-    </aside>
+    </div>
   );
 }

@@ -106,6 +106,9 @@ export default async function BrowsePage({ searchParams }: { searchParams: Promi
         <AdSlot placementKey="browse_top" format="leaderboard" />
       </div>
 
+      {/* The page heading is h1 and the cards are h3, so without this the
+          level jumps. It is announced, not shown. */}
+      <h2 className="sr-only">Results</h2>
       <AnimeGrid
         items={results.data}
         priorityCount={7}

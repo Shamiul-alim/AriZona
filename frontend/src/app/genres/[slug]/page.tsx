@@ -72,6 +72,7 @@ export default async function GenrePage({
         <p className="mt-1 text-[13px] text-ink-faint">{results.meta.total.toLocaleString()} titles</p>
       </header>
 
+      <h2 className="sr-only">Results</h2>
       <AnimeGrid items={results.data} priorityCount={7} emptyMessage={`No ${genre.name} titles published yet`} />
 
       <Pagination

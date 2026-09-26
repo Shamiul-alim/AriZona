@@ -169,7 +169,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
                         <span className="rounded bg-accent/85 px-1 py-px text-[9.5px] font-bold text-[#04221f]">SUB</span>
                       ) : null}
                       {ep.hasDub ? (
-                        <span className="rounded bg-hot/85 px-1 py-px text-[9.5px] font-bold text-white">DUB</span>
+                        <span className="rounded bg-hot-deep px-1 py-px text-[9.5px] font-bold text-white">DUB</span>
                       ) : null}
                       {ep.isFiller ? (
                         <span className="rounded bg-warn/25 px-1 py-px text-[9.5px] font-bold text-warn">FILLER</span>

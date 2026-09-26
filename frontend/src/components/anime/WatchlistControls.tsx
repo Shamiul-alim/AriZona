@@ -142,7 +142,7 @@ export function WatchlistControls({ slug, initialStatus, initialFavorite }: Watc
           title={favorite ? 'Remove from favourites' : 'Add to favourites'}
           className={cn(
             'inline-flex h-10 w-10 items-center justify-center rounded-xl transition disabled:opacity-60',
-            favorite ? 'bg-hot text-white' : 'border border-line bg-surface text-ink-soft hover:bg-surface-2',
+            favorite ? 'bg-hot-deep text-white' : 'border border-line bg-surface text-ink-soft hover:bg-surface-2',
           )}
         >
           <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill={favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.9}>

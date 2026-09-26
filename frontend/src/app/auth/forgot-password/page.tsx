@@ -314,20 +314,23 @@ export default function ForgotPasswordPage() {
 /** Progress through the reset, plus a label for screen readers. */
 function StepDots({ step }: { step: Step }) {
   const current = step === 'done' ? ORDER.length : ORDER.indexOf(step);
+  // aria-label is not permitted on a generic container and is not needed here:
+  // a real, visually hidden sentence says the same thing, and the dots
+  // themselves are decoration once it has been said.
   return (
-    <div
-      className="mb-5 flex items-center justify-center gap-2"
-      aria-label={`Step ${Math.min(current + 1, ORDER.length)} of ${ORDER.length}`}
-    >
-      {ORDER.map((name, i) => (
-        <span
-          key={name}
-          className={cn(
-            'h-1.5 rounded-full transition-all duration-300',
-            i < current ? 'w-6 bg-brand-bright' : i === current ? 'w-6 bg-brand' : 'w-1.5 bg-white/20',
-          )}
-        />
-      ))}
+    <div className="mb-5">
+      <p className="sr-only">{`Step ${Math.min(current + 1, ORDER.length)} of ${ORDER.length}`}</p>
+      <div className="flex items-center justify-center gap-2" aria-hidden="true">
+        {ORDER.map((name, i) => (
+          <span
+            key={name}
+            className={cn(
+              'h-1.5 rounded-full transition-all duration-300',
+              i < current ? 'w-6 bg-brand-bright' : i === current ? 'w-6 bg-brand' : 'w-1.5 bg-white/20',
+            )}
+          />
+        ))}
+      </div>
     </div>
   );
 }

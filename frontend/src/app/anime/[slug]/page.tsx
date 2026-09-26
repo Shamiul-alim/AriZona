@@ -234,7 +234,7 @@ export default async function AnimeDetailPage({ params }: { params: Promise<{ sl
                   <span className="rounded-md bg-accent/90 px-2 py-1 font-bold text-[#04221f]">SUB {anime.subCount}</span>
                 ) : null}
                 {anime.dubCount > 0 ? (
-                  <span className="rounded-md bg-hot/90 px-2 py-1 font-bold text-white">DUB {anime.dubCount}</span>
+                  <span className="rounded-md bg-hot-deep px-2 py-1 font-bold text-white">DUB {anime.dubCount}</span>
                 ) : null}
               </div>
 

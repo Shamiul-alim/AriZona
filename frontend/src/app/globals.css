@@ -20,19 +20,28 @@
   --color-line-soft: #1c1c30;
 
   /* Brand */
-  --color-brand: #7c5cff;
+  /* 2% darker than the original #7c5cff so white button labels reach 4.5:1.
+     The shift is imperceptible; the contrast failure was not. */
+  --color-brand: #795af9;
   --color-brand-bright: #9a80ff;
   --color-brand-dim: #5b3fd6;
   --color-accent: #22e1c8;
   --color-accent-dim: #14b8a3;
   --color-hot: #ff4d8d;
+  /* The same pink, deep enough that white text on it clears 4.5:1. Used for
+     badges and controls that carry a white label; --color-hot stays as-is
+     for decoration (glows, progress fills) where nothing has to be read. */
+  --color-hot-deep: #d03f73;
   --color-gold: #ffc861;
 
   /* Text */
   --color-ink: #f2f3fb;
   --color-ink-soft: #b9bdd2;
   --color-ink-muted: #7e849e;
-  --color-ink-faint: #565b73;
+  /* Was #565b73, which measured 2.8-3.0:1 on these surfaces — below AA for
+     the 10-13px text it is used on. Same hue, lifted until it clears 4.5:1
+     against every background it appears on. */
+  --color-ink-faint: #747b9b;
 
   /* Status */
   --color-ok: #34d399;
