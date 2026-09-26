@@ -388,7 +388,12 @@ async function register() {
   const api = process.env.ANIZORA_API;
   const episodeId = process.env.EPISODE_ID;
   const token = process.env.ADMIN_TOKEN;
-  if (!api || !episodeId || !token) throw new Error('Set ANIZORA_API, EPISODE_ID and ADMIN_TOKEN to register');
+  if (!api || !episodeId || !token) {
+    // Registration is normally done in bulk by register-single-master.mjs once
+    // every episode is encoded, so this is a skip, not a failure.
+    log('register: skipped (no ANIZORA_API/EPISODE_ID/ADMIN_TOKEN) — use register-single-master.mjs');
+    return [];
+  }
   const uploaded = JSON.parse(fs.readFileSync(path.join(WORK, `${FILE_ID}.uploaded.json`), 'utf8'));
 
   const variants = [
