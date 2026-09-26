@@ -27,9 +27,12 @@ function VerifyInner() {
       });
   }, [token]);
 
+  // The fallback, the spinner and the outcome all occupy RESERVED_HEIGHT, so
+  // neither hydration nor the verify response moves the card. AuthShell centres
+  // the column, so any height change here would shift the whole page.
   if (state === 'checking') {
     return (
-      <div className="flex flex-col items-center gap-3 py-4">
+      <div className="grid min-h-[172px] content-center justify-items-center gap-3">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-white/15 border-t-brand-bright" />
         <p className="text-[13.5px] text-ink-muted">Confirming your email…</p>
       </div>
@@ -37,7 +40,7 @@ function VerifyInner() {
   }
 
   return (
-    <div className="text-center">
+    <div className="grid min-h-[172px] content-center text-center">
       <div
         className={`mx-auto grid h-12 w-12 place-items-center rounded-full ${
           state === 'done' ? 'bg-ok/15' : 'bg-danger/15'
@@ -76,7 +79,8 @@ function VerifyInner() {
 export default function VerifyEmailPage() {
   return (
     <AuthShell title="Email confirmation" subtitle="Finishing setting up your account.">
-      <Suspense fallback={<div className="skeleton h-40 rounded-lg" />}>
+      {/* Matches the reserved height inside VerifyInner. */}
+      <Suspense fallback={<div className="skeleton h-[172px] rounded-lg" />}>
         <VerifyInner />
       </Suspense>
     </AuthShell>
