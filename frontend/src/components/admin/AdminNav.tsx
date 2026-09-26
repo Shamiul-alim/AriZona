@@ -79,7 +79,22 @@ export function AdminNav() {
           </p>
         </div>
 
-        <div className="rail flex gap-1 overflow-x-auto p-2 lg:block lg:space-y-3 lg:overflow-visible">
+        {/* Below lg this is a horizontal strip inside an overflow-hidden card,
+            so the last tab used to be sliced mid-word with no scrollbar (.rail
+            hid it) and nothing to suggest it scrolled. It now keeps a slim
+            scrollbar and fades out at the trailing edge, which reads as "there
+            is more" instead of as a rendering fault. scroll-px-2 keeps a tab
+            off the edge when focus scrolls it into view. Unchanged at lg,
+            where the strip is a vertical list. */}
+        <div
+          className={cn(
+            // pr-7 leaves the faded strip of empty space to land on, so the
+            // last tab is fully opaque once it is scrolled to.
+            "flex gap-1 overflow-x-auto scroll-px-2 p-2 pr-7 lg:pr-2",
+            "[mask-image:linear-gradient(to_right,black_0,black_calc(100%-1.75rem),transparent_100%)]",
+            "lg:block lg:space-y-3 lg:overflow-visible lg:[mask-image:none]",
+          )}
+        >
           {visible.map((group) => (
             <div key={group.title} className="shrink-0">
               <p className="hidden px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-ink-faint lg:block">
