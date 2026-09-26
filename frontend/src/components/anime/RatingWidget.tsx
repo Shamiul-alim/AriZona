@@ -50,7 +50,29 @@ export function RatingWidget({ slug }: { slug: string }) {
   };
 
   if (!summary) {
-    return <div className="skeleton h-24 rounded-xl" />;
+    // The placeholder mirrors the real card's structure rather than guessing a
+    // height, because the height is not a constant: the rating buttons are 32px
+    // under a mouse and 44px under a finger, and they wrap differently in a
+    // narrow sidebar than in a full-width column (measured 134px, 170px and
+    // 194px on the same page). Only the same layout matches all of them, and
+    // this card sits above the details list, so getting it wrong pushed
+    // everything below it down once the ratings arrived.
+    return (
+      <div className="card-surface p-4" aria-hidden="true">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="skeleton h-[1.8rem] w-14 rounded" />
+          <span className="skeleton h-3 w-24 self-end rounded" />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1">
+          {Array.from({ length: 10 }, (_, i) => (
+            <span key={i} className="skeleton h-8 w-8 rounded-lg pointer-coarse:h-11 pointer-coarse:w-11" />
+          ))}
+        </div>
+        <div className="mt-2 flex h-[18px] items-center">
+          <span className="skeleton h-3 w-36 rounded" />
+        </div>
+      </div>
+    );
   }
 
   const active = hover ?? summary.myRating ?? 0;
