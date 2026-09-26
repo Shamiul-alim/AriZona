@@ -152,7 +152,7 @@ export function SiteHeader() {
         </Link>
 
         {/* Desktop navigation */}
-        <nav ref={navRef} className="hidden flex-1 items-center gap-0.5 lg:flex" aria-label="Main">
+        <nav ref={navRef} className="hidden flex-1 items-center gap-0.5 xl:flex" aria-label="Main">
           <NavLink href="/" active={pathname === '/'}>
             Home
           </NavLink>
@@ -220,7 +220,7 @@ export function SiteHeader() {
           </NavLink>
         </nav>
 
-        <div className="flex flex-1 items-center justify-end gap-1.5 lg:flex-none">
+        <div className="flex flex-1 items-center justify-end gap-1.5 xl:flex-none">
           {/* Search */}
           <div ref={searchRef} className="relative">
             <form onSubmit={submitSearch} className="flex items-center">
@@ -362,7 +362,7 @@ export function SiteHeader() {
           <button
             type="button"
             onClick={() => setMobileOpen((v) => !v)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-soft transition hover:bg-white/8 lg:hidden"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-soft transition hover:bg-white/8 xl:hidden"
             aria-label="Menu"
             aria-expanded={mobileOpen}
           >
@@ -379,7 +379,7 @@ export function SiteHeader() {
 
       {/* Mobile drawer */}
       {mobileOpen ? (
-        <div className="glass border-t border-line-soft lg:hidden">
+        <div className="glass border-t border-line-soft xl:hidden">
           <nav className="max-h-[70vh] overflow-y-auto px-4 py-3" aria-label="Mobile">
             <MobileLink href="/">Home</MobileLink>
             <MobileLink href="/az">A-Z List</MobileLink>
