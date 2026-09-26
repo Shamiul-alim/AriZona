@@ -175,7 +175,9 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
               aria-label={`Show slide ${i + 1}`}
               aria-current={i === index}
               className={cn(
-                'h-1.5 rounded-full transition-all duration-300',
+                'relative h-1.5 rounded-full transition-all duration-300',
+                // The dot stays 6px; the tappable box around it does not.
+                "before:absolute before:-inset-x-2 before:-inset-y-[19px] before:content-['']",
                 i === index ? 'w-7 bg-brand-bright' : 'w-1.5 bg-white/35 hover:bg-white/60',
               )}
             />

@@ -115,7 +115,7 @@ export function ReportDialog({ open, onClose, targetType, targetId, context }: R
                 type="button"
                 onClick={onClose}
                 aria-label="Close"
-                className="grid h-8 w-8 place-items-center rounded-lg text-ink-muted transition hover:bg-white/8 hover:text-ink"
+                className="grid h-8 w-8 place-items-center rounded-lg text-ink-muted transition hover:bg-white/8 hover:text-ink pointer-coarse:h-11 pointer-coarse:w-11"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
                   <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />

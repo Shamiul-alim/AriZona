@@ -76,8 +76,8 @@ export default async function CommunityPage({ searchParams }: { searchParams: Pr
               aria-current={!category}
               className={
                 !category
-                  ? 'flex items-center justify-between rounded-lg bg-brand/15 px-3 py-2 text-[13px] font-semibold text-ink'
-                  : 'flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink-soft transition hover:bg-white/5 hover:text-ink'
+                  ? 'flex items-center justify-between rounded-lg bg-brand/15 px-3 py-2 text-[13px] font-semibold text-ink pointer-coarse:min-h-11'
+                  : 'flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink-soft transition hover:bg-white/5 hover:text-ink pointer-coarse:min-h-11'
               }
             >
               All posts
@@ -89,8 +89,8 @@ export default async function CommunityPage({ searchParams }: { searchParams: Pr
                 aria-current={category === c.slug}
                 className={
                   category === c.slug
-                    ? 'flex items-center justify-between rounded-lg bg-brand/15 px-3 py-2 text-[13px] font-semibold text-ink'
-                    : 'flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink-soft transition hover:bg-white/5 hover:text-ink'
+                    ? 'flex items-center justify-between rounded-lg bg-brand/15 px-3 py-2 text-[13px] font-semibold text-ink pointer-coarse:min-h-11'
+                    : 'flex items-center justify-between rounded-lg px-3 py-2 text-[13px] text-ink-soft transition hover:bg-white/5 hover:text-ink pointer-coarse:min-h-11'
                 }
               >
                 <span className="flex items-center gap-2">

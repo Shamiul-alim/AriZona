@@ -287,7 +287,7 @@ export function CommentsSection({ animeSlug, episodeId, title = 'Comments' }: Co
                   <button
                     type="button"
                     onClick={() => setReplyTo(null)}
-                    className="rounded-lg px-3 py-1.5 text-[12.5px] text-ink-muted transition hover:text-ink"
+                    className="rounded-lg px-3 py-1.5 text-[12.5px] text-ink-muted transition hover:text-ink pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                   >
                     Cancel
                   </button>
@@ -324,8 +324,8 @@ export function CommentsSection({ animeSlug, episodeId, title = 'Comments' }: Co
               }}
               className={
                 sort === option
-                  ? 'rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-white'
-                  : 'rounded-lg px-3 py-1.5 text-[12.5px] text-ink-muted transition hover:text-ink'
+                  ? 'rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-white pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center'
+                  : 'rounded-lg px-3 py-1.5 text-[12.5px] text-ink-muted transition hover:text-ink pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center'
               }
             >
               {option === 'newest' ? 'Newest' : option === 'top' ? 'Top' : 'Oldest'}

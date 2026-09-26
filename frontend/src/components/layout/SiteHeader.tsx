@@ -147,7 +147,7 @@ export function SiteHeader() {
       )}
     >
       <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 md:px-6">
-        <Link href="/" aria-label="Home" className="shrink-0">
+        <Link href="/" aria-label="Home" className="flex shrink-0 items-center pointer-coarse:min-h-11">
           <Logo />
         </Link>
 
@@ -233,6 +233,7 @@ export function SiteHeader() {
                 aria-label="Search anime"
                 className={cn(
                   'h-9 rounded-full border border-line-soft bg-surface/80 pl-9 pr-3 text-[13px] text-ink outline-none transition-all placeholder:text-ink-faint focus:border-brand/60 focus:bg-surface',
+                  'pointer-coarse:h-11',
                   'w-36 focus:w-56 sm:w-44 sm:focus:w-72',
                 )}
               />
@@ -297,7 +298,7 @@ export function SiteHeader() {
               <button
                 type="button"
                 onClick={() => toggleMenu('account')}
-                className="flex h-9 items-center gap-2 rounded-full border border-line-soft bg-surface/80 pl-1 pr-2.5 transition hover:border-brand/50"
+                className="flex h-9 items-center gap-2 rounded-full border border-line-soft bg-surface/80 pl-1 pr-2.5 transition hover:border-brand/50 pointer-coarse:h-11"
                 aria-label="Account menu"
               >
                 <span className="relative h-7 w-7 overflow-hidden rounded-full bg-surface-3">
@@ -345,13 +346,13 @@ export function SiteHeader() {
             <div className="hidden items-center gap-1.5 sm:flex">
               <Link
                 href="/auth/login"
-                className="inline-flex h-9 items-center rounded-full px-3.5 text-[13px] font-semibold text-ink-soft transition hover:bg-white/8 hover:text-ink"
+                className="inline-flex h-9 items-center rounded-full px-3.5 text-[13px] font-semibold text-ink-soft transition hover:bg-white/8 hover:text-ink pointer-coarse:h-11"
               >
                 Sign in
               </Link>
               <Link
                 href="/auth/register"
-                className="inline-flex h-9 items-center rounded-full bg-brand px-4 text-[13px] font-semibold text-white transition hover:bg-brand-bright"
+                className="inline-flex h-9 items-center rounded-full bg-brand px-4 text-[13px] font-semibold text-white transition hover:bg-brand-bright pointer-coarse:h-11"
               >
                 Sign up
               </Link>
@@ -362,7 +363,7 @@ export function SiteHeader() {
           <button
             type="button"
             onClick={() => setMobileOpen((v) => !v)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-soft transition hover:bg-white/8 xl:hidden"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-ink-soft transition hover:bg-white/8 pointer-coarse:h-11 pointer-coarse:w-11 xl:hidden"
             aria-label="Menu"
             aria-expanded={mobileOpen}
           >

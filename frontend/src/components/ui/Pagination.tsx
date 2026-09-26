@@ -39,6 +39,7 @@ export function Pagination({ meta, buildHref }: PaginationProps) {
             aria-current={page === meta.page ? 'page' : undefined}
             className={cn(
               'inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-3 text-[13px] font-semibold transition',
+              'pointer-coarse:h-11 pointer-coarse:min-w-11',
               page === meta.page
                 ? 'bg-brand text-white'
                 : 'bg-surface text-ink-soft ring-1 ring-line-soft hover:bg-surface-2 hover:text-ink',
@@ -78,7 +79,7 @@ function PageLink({
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-surface/40 px-3 text-[13px] text-ink-faint/50"
+        className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-surface/40 px-3 text-[13px] text-ink-faint/50 pointer-coarse:h-11 pointer-coarse:min-w-11"
       >
         {children}
       </span>
@@ -88,7 +89,7 @@ function PageLink({
     <Link
       href={href}
       aria-label={label}
-      className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-surface px-3 text-[13px] text-ink-soft ring-1 ring-line-soft transition hover:bg-surface-2 hover:text-ink"
+      className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg bg-surface px-3 text-[13px] text-ink-soft ring-1 ring-line-soft transition hover:bg-surface-2 hover:text-ink pointer-coarse:h-11 pointer-coarse:min-w-11"
     >
       {children}
     </Link>

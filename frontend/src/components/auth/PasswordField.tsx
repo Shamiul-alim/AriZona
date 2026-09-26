@@ -91,7 +91,7 @@ export function PasswordField({
           aria-label={visible ? 'Hide password' : 'Show password'}
           aria-pressed={visible}
           title={visible ? 'Hide password' : 'Show password'}
-          className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 cursor-pointer place-items-center rounded-md text-ink-muted transition hover:bg-white/8 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+          className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 cursor-pointer place-items-center rounded-md text-ink-muted transition hover:bg-white/8 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 pointer-coarse:h-11 pointer-coarse:w-11"
         >
           {visible ? <EyeOffIcon className="h-[18px] w-[18px]" /> : <EyeIcon className="h-[18px] w-[18px]" />}
         </button>

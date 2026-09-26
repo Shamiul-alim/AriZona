@@ -56,7 +56,12 @@ export function SiteFooter() {
               <ul className="space-y-2">
                 {column.links.map((link) => (
                   <li key={link.href}>
-                    <Link href={link.href} className="text-[13px] text-ink-muted transition hover:text-ink">
+                    <Link
+                      href={link.href}
+                      // The negative margin keeps the visual rhythm of the list while
+                      // the padding gives the link a 44px row to be tapped in.
+                      className="-my-1.5 inline-block py-1.5 text-[13px] text-ink-muted transition hover:text-ink pointer-coarse:-my-3 pointer-coarse:py-3"
+                    >
                       {link.label}
                     </Link>
                   </li>
@@ -70,17 +75,17 @@ export function SiteFooter() {
           <p>
             © {new Date().getFullYear()} {SITE_NAME}. All content is streamed by the operator of this installation.
           </p>
-          <div className="flex flex-wrap gap-4">
-            <Link href="/guides/dmca" className="transition hover:text-ink-soft">
+          <div className="flex flex-wrap gap-4 pointer-coarse:gap-x-5">
+            <Link href="/guides/dmca" className="-my-[13px] inline-block py-[13px] transition hover:text-ink-soft">
               DMCA
             </Link>
-            <Link href="/guides/privacy" className="transition hover:text-ink-soft">
+            <Link href="/guides/privacy" className="-my-[13px] inline-block py-[13px] transition hover:text-ink-soft">
               Privacy
             </Link>
-            <Link href="/guides/terms" className="transition hover:text-ink-soft">
+            <Link href="/guides/terms" className="-my-[13px] inline-block py-[13px] transition hover:text-ink-soft">
               Terms
             </Link>
-            <Link href="/contact" className="transition hover:text-ink-soft">
+            <Link href="/contact" className="-my-[13px] inline-block py-[13px] transition hover:text-ink-soft">
               Contact
             </Link>
           </div>

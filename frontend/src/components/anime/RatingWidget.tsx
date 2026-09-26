@@ -86,6 +86,7 @@ export function RatingWidget({ slug }: { slug: string }) {
             onClick={() => void submit(score)}
             className={cn(
               'h-8 w-8 rounded-lg text-[12.5px] font-bold transition disabled:opacity-50',
+              'pointer-coarse:h-11 pointer-coarse:w-11',
               score <= active
                 ? 'bg-gold text-[#2a1c00]'
                 : 'bg-surface-2 text-ink-muted hover:bg-surface-3 hover:text-ink',

@@ -12,7 +12,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-md flex-col justify-center px-4 py-12">
       <div className="mb-7 text-center">
-        <Link href="/" className="inline-block" aria-label="Home">
+        <Link href="/" className="inline-flex items-center pointer-coarse:min-h-11" aria-label="Home">
           <Logo />
         </Link>
         <h1 className="mt-6 text-[1.5rem] font-extrabold text-ink">{title}</h1>

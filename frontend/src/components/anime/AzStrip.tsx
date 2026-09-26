@@ -36,7 +36,11 @@ export async function AzStrip({ active, basePath = '/az' }: AzStripProps) {
             aria-current={isActive}
             aria-disabled={disabled}
             className={cn(
+              // A grid of one-character links is the hardest thing on the site to tap,
+              // so on a touch pointer each letter gets a full 44px box. A mouse keeps
+              // the compact strip.
               'inline-flex min-w-9 items-center justify-center rounded-lg px-2.5 py-1.5 text-[13px] font-semibold transition',
+              'pointer-coarse:min-h-11 pointer-coarse:min-w-11',
               isActive
                 ? 'bg-brand text-white'
                 : disabled

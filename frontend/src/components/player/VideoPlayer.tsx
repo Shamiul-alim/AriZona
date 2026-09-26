@@ -1027,6 +1027,7 @@ function ControlButton({
       aria-label={label}
       className={cn(
         'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-soft transition hover:bg-white/12 hover:text-ink',
+        'pointer-coarse:h-11 pointer-coarse:w-11',
         active && 'text-accent',
         className,
       )}

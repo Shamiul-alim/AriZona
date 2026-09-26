@@ -24,7 +24,7 @@ export function SectionHeader({ title, subtitle, href, linkLabel = 'View all', c
         {href ? (
           <Link
             href={href}
-            className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold text-brand-bright transition hover:bg-white/6"
+            className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold text-brand-bright transition hover:bg-white/6 pointer-coarse:flex pointer-coarse:min-h-11 pointer-coarse:items-center"
           >
             {linkLabel} →
           </Link>
@@ -54,8 +54,8 @@ export function TabGroup<T extends string>({
           aria-pressed={active === tab.value}
           className={
             active === tab.value
-              ? 'rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-white'
-              : 'rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-ink-muted transition hover:bg-white/6 hover:text-ink'
+              ? 'rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-semibold text-white pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center'
+              : 'rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-ink-muted transition hover:bg-white/6 hover:text-ink pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center'
           }
         >
           {tab.label}
