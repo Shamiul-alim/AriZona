@@ -317,8 +317,13 @@ async function userClient() {
 /* ------------------------------------------------------------- upload --- */
 
 const CACHE_FOLDER_NAME = process.env.RENDITION_FOLDER ?? 'AniZora _renditions';
-/** Hard ceiling, well under the free Drive allowance. Checked before every upload. */
-const MAX_CACHE_BYTES = Number(process.env.MAX_CACHE_BYTES ?? 2 * 1024 ** 3);
+/**
+ * Hard ceiling for GENERATED renditions only — masters are in a different
+ * folder, are never counted here and are never eviction candidates. Checked
+ * before every upload, so the cache cannot grow past it even if eviction
+ * cannot free enough space (the upload is refused instead).
+ */
+const MAX_CACHE_BYTES = Number(process.env.MAX_CACHE_BYTES ?? 8 * 1024 ** 3);
 
 async function cacheFolder(drive) {
   const found = await drive.files.list({
@@ -435,6 +440,21 @@ if (PHASES.has('encode')) {
   const cpu = encoded.reduce((s, r) => s + r.seconds, 0);
   log(`renditions: ${MB(total)} MB total, ${cpu.toFixed(0)}s wall clock`);
   log(`master stays ${MB(report.sizeBytes)} MB — renditions are ${((total / report.sizeBytes) * 100).toFixed(0)}% of it`);
+}
+
+if (PHASES.has('cache-status')) {
+  const drive = await userClient();
+  const folderId = await cacheFolder(drive);
+  const { files, bytes } = await cacheUsage(drive, folderId);
+  const byRung = {};
+  for (const f of files) {
+    const rung = /\.(\d+p)\.mp4$/.exec(f.name)?.[1] ?? 'other';
+    byRung[rung] = (byRung[rung] ?? 0) + Number(f.size ?? 0);
+  }
+  log(`cache ceiling : ${MB(MAX_CACHE_BYTES)} MB (${(MAX_CACHE_BYTES / 1024 ** 3).toFixed(0)} GB)`);
+  log(`cache usage   : ${MB(bytes)} MB across ${files.length} generated files (${((bytes / MAX_CACHE_BYTES) * 100).toFixed(0)}% of ceiling)`);
+  for (const [rung, size] of Object.entries(byRung).sort()) log(`  ${rung}: ${MB(size)} MB`);
+  log(`headroom      : ${MB(MAX_CACHE_BYTES - bytes)} MB`);
 }
 
 if (PHASES.has('upload')) {
