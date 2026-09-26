@@ -214,8 +214,13 @@ function encodeOne(input, rung, outPath) {
 
 async function encode(report, masterPath) {
   const results = [];
+  const already = uploadedSoFar();
   for (const rung of report.ladder) {
     const out = path.join(WORK, `${FILE_ID}.${rung.height}p.mp4`);
+    if (already.some((u) => u.height === rung.height)) {
+      log(`${rung.height}p already uploaded — skipping (use FORCE=1 to redo)`);
+      continue;
+    }
     log(`encoding ${rung.height}p @ ${rung.kbps}k ...`);
     const secs = await encodeOne(masterPath, rung, out);
     const size = fs.statSync(out).size;
@@ -224,6 +229,17 @@ async function encode(report, masterPath) {
   }
   fs.writeFileSync(path.join(WORK, `${FILE_ID}.encoded.json`), JSON.stringify(results, null, 2));
   return results;
+}
+
+/** Renditions already uploaded for this master, if any. */
+function uploadedSoFar() {
+  const file = path.join(WORK, `${FILE_ID}.uploaded.json`);
+  if (!fs.existsSync(file) || process.env.FORCE === '1') return [];
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return [];
+  }
 }
 
 /* --------------------------------------------------------------- auth --- */
@@ -422,8 +438,13 @@ if (PHASES.has('encode')) {
 }
 
 if (PHASES.has('upload')) {
-  const uploaded = await upload();
-  fs.writeFileSync(path.join(WORK, `${FILE_ID}.uploaded.json`), JSON.stringify(uploaded, null, 2));
+  const fresh = await upload();
+  // Merge, so adding a rung later never discards renditions already uploaded.
+  const merged = [...uploadedSoFar().filter((u) => !fresh.some((f) => f.height === u.height)), ...fresh].sort(
+    (a, b) => b.height - a.height,
+  );
+  fs.writeFileSync(path.join(WORK, `${FILE_ID}.uploaded.json`), JSON.stringify(merged, null, 2));
+  log(`manifest now holds: ${merged.map((m) => m.height + 'p').join(', ')}`);
 }
 
 if (PHASES.has('register')) await register();
