@@ -38,11 +38,25 @@ export class AnimeService {
     });
     if (!anime) throw new NotFoundException(`No anime found at "${slug}"`);
 
-    const [episodeCount, userState] = await Promise.all([
+    const [episodeCount, userState, seasons] = await Promise.all([
       this.prisma.episode.count({
         where: { animeId: anime.id, publishStatus: PublishStatus.PUBLISHED, deletedAt: null },
       }),
       userId ? this.userStateFor(anime.id, userId) : Promise.resolve(null),
+      // Season headings only. The episodes themselves come from
+      // /anime/:slug/episodes, which the detail page already requests, so
+      // nesting them here would ship the same list twice.
+      this.prisma.season.findMany({
+        where: { animeId: anime.id },
+        orderBy: { number: 'asc' },
+        select: {
+          id: true,
+          number: true,
+          title: true,
+          posterUrl: true,
+          _count: { select: { episodes: { where: { publishStatus: PublishStatus.PUBLISHED, deletedAt: null } } } },
+        },
+      }),
     ]);
 
     return {
@@ -52,6 +66,7 @@ export class AnimeService {
       producers: anime.producers.map((p) => p.producer),
       related: anime.relationsFrom.map((r) => ({ kind: r.kind, anime: toAnimeCard(r.relatedAnime) })),
       publishedEpisodeCount: episodeCount,
+      seasons: seasons.map(({ _count, ...season }) => ({ ...season, episodeCount: _count.episodes })),
       userState,
       relationsFrom: undefined,
     };

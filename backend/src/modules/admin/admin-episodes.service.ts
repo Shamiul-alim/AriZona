@@ -94,6 +94,7 @@ export class AdminEpisodesService {
     });
     if (clash) throw new BadRequestException(`Episode ${dto.number} already exists for this title`);
 
+    await this.assertSeasonBelongsToAnime(dto.animeId, dto.seasonId);
     this.assertTimestamps(dto);
 
     const episode = await this.prisma.episode.create({
@@ -125,6 +126,7 @@ export class AdminEpisodesService {
       if (clash) throw new BadRequestException(`Episode ${dto.number} already exists for this title`);
     }
 
+    await this.assertSeasonBelongsToAnime(existing.animeId, dto.seasonId);
     this.assertTimestamps(dto);
 
     await this.prisma.episode.update({
@@ -354,6 +356,23 @@ export class AdminEpisodesService {
   }
 
   /** Markers must be ordered and consistent, or the skip buttons misbehave. */
+  /**
+   * A season belongs to exactly one anime, so attaching an episode to a season
+   * from a different title would produce a row that no season view could ever
+   * show correctly. The unique constraint does not catch it — only this does.
+   */
+  private async assertSeasonBelongsToAnime(animeId: string, seasonId: string | null | undefined): Promise<void> {
+    if (!seasonId) return;
+    const season = await this.prisma.season.findUnique({
+      where: { id: seasonId },
+      select: { animeId: true },
+    });
+    if (!season) throw new NotFoundException('Season not found');
+    if (season.animeId !== animeId) {
+      throw new BadRequestException('That season belongs to a different anime');
+    }
+  }
+
   private assertTimestamps(dto: CreateEpisodeDto | UpdateEpisodeDto): void {
     if (dto.introStart != null && dto.introEnd != null && dto.introEnd <= dto.introStart) {
       throw new BadRequestException('Intro end must be after intro start');

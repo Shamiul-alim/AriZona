@@ -4,6 +4,7 @@ import { PaginatedResult, paginate } from 'src/common/dto/pagination.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { MediaProviderRegistry } from '../media/media-provider.registry';
 import { MediaService } from '../media/media.service';
+import { withSeasonOrdinals } from './season-ordinal';
 
 const PUBLISHED_EPISODE: Prisma.EpisodeWhereInput = {
   publishStatus: PublishStatus.PUBLISHED,
@@ -67,13 +68,40 @@ export class EpisodesService {
           hasDub: true,
           isFiller: true,
           viewCount: true,
+          seasonId: true,
+          season: { select: { number: true, title: true } },
         },
       }),
       this.prisma.episode.count({ where }),
     ]);
 
+    // The display ordinal counts from the start of a season, so it cannot be
+    // derived from one page of results. This reads only (number, seasonId) for
+    // the whole title — an indexed scan over a small table — and applies the
+    // ordinals to whichever rows this page contains.
+    const all = await this.prisma.episode.findMany({
+      where: { animeId: anime.id, ...PUBLISHED_EPISODE },
+      select: { number: true, seasonId: true },
+    });
+    const ordinalFor = new Map(
+      withSeasonOrdinals(all.map((e) => ({ number: Number(e.number), seasonId: e.seasonId }))).map((e) => [
+        `${e.seasonId ?? '-'}:${e.number}`,
+        e.seasonEpisodeNumber,
+      ]),
+    );
+
     return paginate(
-      rows.map((r) => ({ ...r, number: Number(r.number) })),
+      rows.map((r) => {
+        const number = Number(r.number);
+        return {
+          ...r,
+          number,
+          seasonEpisodeNumber: ordinalFor.get(`${r.seasonId ?? '-'}:${number}`) ?? number,
+          seasonNumber: r.season?.number ?? null,
+          seasonTitle: r.season?.title ?? null,
+          season: undefined,
+        };
+      }),
       total,
       page,
       limit,
@@ -176,22 +204,37 @@ export class EpisodesService {
         subtitleTracks: { where: { isActive: true, mediaSourceId: null } },
         downloadSources: { where: { isActive: true } },
         audioTracks: { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+        season: { select: { id: true, number: true, title: true } },
       },
     });
     if (!episode) {
       throw new NotFoundException(`Episode ${episodeNumber} of "${animeSlug}" is not available`);
     }
 
+    // Display ordinals count from the start of a season, so they need the whole
+    // title, not just these three episodes.
+    const seasonEpisodes = await this.prisma.episode.findMany({
+      where: { animeId: anime.id, ...PUBLISHED_EPISODE },
+      select: { number: true, seasonId: true },
+    });
+    const ordinalFor = new Map(
+      withSeasonOrdinals(seasonEpisodes.map((e) => ({ number: Number(e.number), seasonId: e.seasonId }))).map((e) => [
+        `${e.seasonId ?? '-'}:${e.number}`,
+        e.seasonEpisodeNumber,
+      ]),
+    );
+    const ordinal = (n: number, seasonId: string | null) => ordinalFor.get(`${seasonId ?? '-'}:${n}`) ?? n;
+
     const [previous, next, progress] = await Promise.all([
       this.prisma.episode.findFirst({
         where: { animeId: anime.id, number: { lt: episodeNumber }, ...PUBLISHED_EPISODE },
         orderBy: { number: 'desc' },
-        select: { number: true, title: true },
+        select: { number: true, title: true, seasonId: true, season: { select: { number: true, title: true } } },
       }),
       this.prisma.episode.findFirst({
         where: { animeId: anime.id, number: { gt: episodeNumber }, ...PUBLISHED_EPISODE },
         orderBy: { number: 'asc' },
-        select: { number: true, title: true },
+        select: { number: true, title: true, seasonId: true, season: { select: { number: true, title: true } } },
       }),
       userId
         ? this.prisma.watchProgress.findUnique({
@@ -218,6 +261,13 @@ export class EpisodesService {
         hasDub: episode.hasDub,
         isFiller: episode.isFiller,
         viewCount: episode.viewCount,
+        /**
+         * Where this episode sits for a viewer: `number` stays canonical (it is
+         * what the URL uses), while `seasonEpisodeNumber` is what the page
+         * shows. They are equal for a title without seasons.
+         */
+        season: episode.season,
+        seasonEpisodeNumber: ordinal(Number(episode.number), episode.seasonId),
         // Null markers make the player hide the corresponding skip button
         // rather than render a control that would do nothing.
         introStart: episode.introStart,
@@ -226,8 +276,22 @@ export class EpisodesService {
         outroEnd: episode.outroEnd,
       },
       navigation: {
-        previous: previous ? { number: Number(previous.number), title: previous.title } : null,
-        next: next ? { number: Number(next.number), title: next.title } : null,
+        previous: previous
+          ? {
+              number: Number(previous.number),
+              title: previous.title,
+              season: previous.season,
+              seasonEpisodeNumber: ordinal(Number(previous.number), previous.seasonId),
+            }
+          : null,
+        next: next
+          ? {
+              number: Number(next.number),
+              title: next.title,
+              season: next.season,
+              seasonEpisodeNumber: ordinal(Number(next.number), next.seasonId),
+            }
+          : null,
       },
       playback: {
         ...this.buildManifest(episode),
