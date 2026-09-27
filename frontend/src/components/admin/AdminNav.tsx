@@ -27,7 +27,6 @@ const GROUPS: NavGroup[] = [
     title: 'Catalogue',
     items: [
       { href: '/admin/anime', label: 'Anime', role: 'ADMIN' },
-      { href: '/admin/seasons', label: 'Seasons', role: 'ADMIN' },
       { href: '/admin/episodes', label: 'Episodes', role: 'ADMIN' },
       { href: '/admin/taxonomy', label: 'Genres & Studios', role: 'ADMIN' },
       { href: '/admin/featured', label: 'Homepage Slider', role: 'ADMIN' },

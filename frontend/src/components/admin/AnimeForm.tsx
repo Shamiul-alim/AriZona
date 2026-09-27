@@ -8,6 +8,7 @@ import { authFetch } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import { AdminHeader, Banner, Button, Card, Label, adminInput, adminSelect, adminTextarea } from './ui';
 import { ImageUploadField } from './ImageUploadField';
+import { SeasonManager } from './SeasonManager';
 
 const TYPES = ['TV', 'MOVIE', 'OVA', 'ONA', 'SPECIAL', 'TV_SHORT', 'TV_SPECIAL', 'MUSIC', 'OTHER'];
 const STATUSES = ['ONGOING', 'COMPLETED', 'UPCOMING', 'HIATUS', 'CANCELLED'];
@@ -267,6 +268,11 @@ export function AnimeForm({ animeId }: { animeId?: string }) {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-5">
+          {/* Seasons are managed here rather than in their own admin section:
+              a season belongs to one anime, so this is where an admin is
+              already standing when they need one. */}
+          <SeasonManager animeId={animeId} />
+
           <Card title="Titles">
             <div className="space-y-4">
               <label className="block">

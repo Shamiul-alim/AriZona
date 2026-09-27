@@ -47,8 +47,17 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
     seasons.find((s) => episodes.some((ep) => ep.seasonId === s.id && ep.number === currentEpisode))?.id ??
     seasons[0]?.id ??
     null;
-  const [seasonId, setSeasonId] = useState<string | null>(initialSeason);
-  const activeSeasonId = seasons.some((s) => s.id === seasonId) ? seasonId : initialSeason;
+  /**
+   * undefined  — no explicit choice yet, so follow the episode being watched
+   * null       — the viewer collapsed the open season
+   * an id      — the viewer expanded that season
+   *
+   * The three states have to stay distinct: treating "collapsed" as "unset"
+   * would re-expand the first season the moment it was closed.
+   */
+  const [choice, setChoice] = useState<string | null | undefined>(undefined);
+  const chosenExists = choice === null || (choice !== undefined && seasons.some((s) => s.id === choice));
+  const activeSeasonId = choice !== undefined && chosenExists ? choice : initialSeason;
 
   /**
    * Only the chosen season is rendered — switching seasons is a state change,
@@ -88,6 +97,118 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
         (ep.title ?? '').toLowerCase().includes(term),
     );
   }, [inSeason, search, ranges.length, rangeStart]);
+
+  /**
+   * The episode list exactly as it was before seasons existed. It is defined
+   * once and rendered either on its own (a title with no seasons) or inside
+   * whichever season is expanded, so the season feature groups this UI rather
+   * than replacing it.
+   */
+  const episodesBlock = (
+    <>
+        {ranges.length > 0 && !search ? (
+          <div className="flex flex-wrap gap-1.5 border-b border-line-soft p-3">
+            {ranges.map((range) => (
+              <button
+                key={range.start}
+                type="button"
+                onClick={() => setRangeStart(range.start)}
+                className={cn(
+                  'rounded-lg px-2.5 py-1 text-[12px] font-semibold transition',
+                  rangeStart === range.start ? 'bg-brand text-white' : 'bg-surface-2 text-ink-soft hover:bg-surface-3',
+                )}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {visible.length === 0 ? (
+          <p className="px-4 py-10 text-center text-[13px] text-ink-faint">No episodes match “{search}”.</p>
+        ) : layout === 'grid' ? (
+          <div className="grid max-h-[32rem] grid-cols-[repeat(auto-fill,minmax(3.2rem,1fr))] gap-1.5 overflow-y-auto p-3">
+            {visible.map((ep) => (
+              <Link
+                key={ep.id}
+                href={`/watch/${animeSlug}/ep-${ep.number}`}
+                title={ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
+                className={cn(
+                  'grid h-10 place-items-center rounded-lg text-[13px] font-semibold transition',
+                  currentEpisode === ep.number
+                    ? 'bg-brand text-white'
+                    : 'bg-surface-2 text-ink-soft hover:bg-surface-3 hover:text-ink',
+                )}
+              >
+                {ep.seasonEpisodeNumber}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <ul className={cn('divide-y divide-line-soft overflow-y-auto', compact ? 'max-h-[26rem]' : 'max-h-[40rem]')}>
+            {visible.map((ep) => {
+              const isCurrent = currentEpisode === ep.number;
+              return (
+                <li key={ep.id}>
+                  <Link
+                    href={`/watch/${animeSlug}/ep-${ep.number}`}
+                    className={cn(
+                      'group/row flex items-center gap-3 px-3 py-2.5 transition',
+                      isCurrent ? 'bg-brand/12' : 'hover:bg-white/5',
+                    )}
+                    aria-current={isCurrent}
+                  >
+                    <span
+                      className={cn(
+                        'w-9 shrink-0 text-center text-[13px] font-bold tabular-nums',
+                        isCurrent ? 'text-brand-bright' : 'text-ink-faint',
+                      )}
+                    >
+                      {ep.seasonEpisodeNumber}
+                    </span>
+
+                    {!compact && ep.thumbnailUrl ? (
+                      <span className="relative hidden h-12 w-20 shrink-0 overflow-hidden rounded-md bg-surface-2 sm:block">
+                        <Image src={ep.thumbnailUrl} alt="" fill sizes="80px" className="object-cover" />
+                      </span>
+                    ) : null}
+
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={cn(
+                          'clamp-2 block text-[13px] font-medium leading-snug',
+                          isCurrent ? 'text-ink' : 'text-ink-soft group-hover/row:text-ink',
+                        )}
+                      >
+                        {ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
+                      </span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
+                        {ep.hasSub ? (
+                          <span className="rounded bg-accent/85 px-1 py-px text-[9.5px] font-bold text-[#04221f]">SUB</span>
+                        ) : null}
+                        {ep.hasDub ? (
+                          <span className="rounded bg-hot-deep px-1 py-px text-[9.5px] font-bold text-white">DUB</span>
+                        ) : null}
+                        {ep.isFiller ? (
+                          <span className="rounded bg-warn/25 px-1 py-px text-[9.5px] font-bold text-warn">FILLER</span>
+                        ) : null}
+                        {ep.durationSeconds ? <span>{formatTime(ep.durationSeconds)}</span> : null}
+                      </span>
+                    </span>
+
+                    {isCurrent ? (
+                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-brand-bright">
+                        Now
+                      </span>
+                    ) : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+    </>
+  );
 
   return (
     <div className="card-surface overflow-hidden">
@@ -135,135 +256,63 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
         ) : null}
       </div>
 
-      {seasons.length > 1 ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3 py-2.5">
-          {/* A native select is keyboard- and screen-reader-correct for free,
-              works the same on a phone as on a desktop, and does not care how
-              many seasons a title has. */}
-          <label htmlFor={selectId} className="text-[12px] font-semibold text-ink-soft">
-            Season
-          </label>
-          <select
-            id={selectId}
-            value={activeSeasonId ?? ''}
-            onChange={(e) => {
-              setSeasonId(e.target.value);
-              setRangeStart(0);
-            }}
-            className="h-9 min-w-0 flex-1 rounded-lg border border-line-soft bg-base px-2.5 text-[13px] text-ink outline-none transition focus:border-brand/60 pointer-coarse:h-11 sm:flex-none"
-          >
-            {seasons.map((season) => (
-              <option key={season.id} value={season.id}>
-                {season.title ? `Season ${season.number} — ${season.title}` : `Season ${season.number}`} (
-                {season.count} {season.count === 1 ? 'episode' : 'episodes'})
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : seasons.length === 1 ? (
-        // One season needs no control, only the label, so the viewer still
-        // knows what they are looking at.
-        <p className="border-b border-line-soft px-3 py-2 text-[12px] font-semibold text-ink-soft">
-          {seasons[0].title ? `Season ${seasons[0].number} — ${seasons[0].title}` : `Season ${seasons[0].number}`}
-        </p>
-      ) : null}
-
-      {ranges.length > 0 && !search ? (
-        <div className="flex flex-wrap gap-1.5 border-b border-line-soft p-3">
-          {ranges.map((range) => (
-            <button
-              key={range.start}
-              type="button"
-              onClick={() => setRangeStart(range.start)}
-              className={cn(
-                'rounded-lg px-2.5 py-1 text-[12px] font-semibold transition',
-                rangeStart === range.start ? 'bg-brand text-white' : 'bg-surface-2 text-ink-soft hover:bg-surface-3',
-              )}
-            >
-              {range.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {visible.length === 0 ? (
-        <p className="px-4 py-10 text-center text-[13px] text-ink-faint">No episodes match “{search}”.</p>
-      ) : layout === 'grid' ? (
-        <div className="grid max-h-[32rem] grid-cols-[repeat(auto-fill,minmax(3.2rem,1fr))] gap-1.5 overflow-y-auto p-3">
-          {visible.map((ep) => (
-            <Link
-              key={ep.id}
-              href={`/watch/${animeSlug}/ep-${ep.number}`}
-              title={ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
-              className={cn(
-                'grid h-10 place-items-center rounded-lg text-[13px] font-semibold transition',
-                currentEpisode === ep.number
-                  ? 'bg-brand text-white'
-                  : 'bg-surface-2 text-ink-soft hover:bg-surface-3 hover:text-ink',
-              )}
-            >
-              {ep.seasonEpisodeNumber}
-            </Link>
-          ))}
-        </div>
+      {/* Seasons stack one below another; the expanded one shows the ordinary
+          episode list directly underneath its own row. One at a time, so the
+          page never becomes a wall of every season's episodes, and only the
+          expanded season is in the DOM at all. */}
+      {seasons.length === 0 ? (
+        episodesBlock
       ) : (
-        <ul className={cn('divide-y divide-line-soft overflow-y-auto', compact ? 'max-h-[26rem]' : 'max-h-[40rem]')}>
-          {visible.map((ep) => {
-            const isCurrent = currentEpisode === ep.number;
+        <ul className="divide-y divide-line-soft">
+          {seasons.map((season) => {
+            const expanded = activeSeasonId === season.id;
+            const panelId = `${selectId}-season-${season.id}`;
             return (
-              <li key={ep.id}>
-                <Link
-                  href={`/watch/${animeSlug}/ep-${ep.number}`}
+              <li key={season.id}>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={panelId}
+                  onClick={() => {
+                    // Collapsing the open season is allowed; it is a disclosure,
+                    // not a required choice.
+                    setChoice(expanded ? null : season.id);
+                    setRangeStart(0);
+                  }}
                   className={cn(
-                    'group/row flex items-center gap-3 px-3 py-2.5 transition',
-                    isCurrent ? 'bg-brand/12' : 'hover:bg-white/5',
+                    'flex w-full items-center gap-3 px-3 py-3 text-left transition',
+                    expanded ? 'bg-brand/10' : 'hover:bg-white/5',
                   )}
-                  aria-current={isCurrent}
                 >
-                  <span
-                    className={cn(
-                      'w-9 shrink-0 text-center text-[13px] font-bold tabular-nums',
-                      isCurrent ? 'text-brand-bright' : 'text-ink-faint',
-                    )}
-                  >
-                    {ep.seasonEpisodeNumber}
-                  </span>
-
-                  {!compact && ep.thumbnailUrl ? (
-                    <span className="relative hidden h-12 w-20 shrink-0 overflow-hidden rounded-md bg-surface-2 sm:block">
-                      <Image src={ep.thumbnailUrl} alt="" fill sizes="80px" className="object-cover" />
-                    </span>
-                  ) : null}
-
                   <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        'clamp-2 block text-[13px] font-medium leading-snug',
-                        isCurrent ? 'text-ink' : 'text-ink-soft group-hover/row:text-ink',
-                      )}
-                    >
-                      {ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
+                    <span className={cn('block text-[13.5px] font-bold', expanded ? 'text-ink' : 'text-ink-soft')}>
+                      Season {season.number}
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
-                      {ep.hasSub ? (
-                        <span className="rounded bg-accent/85 px-1 py-px text-[9.5px] font-bold text-[#04221f]">SUB</span>
-                      ) : null}
-                      {ep.hasDub ? (
-                        <span className="rounded bg-hot-deep px-1 py-px text-[9.5px] font-bold text-white">DUB</span>
-                      ) : null}
-                      {ep.isFiller ? (
-                        <span className="rounded bg-warn/25 px-1 py-px text-[9.5px] font-bold text-warn">FILLER</span>
-                      ) : null}
-                      {ep.durationSeconds ? <span>{formatTime(ep.durationSeconds)}</span> : null}
-                    </span>
+                    {season.title ? (
+                      <span className="clamp-2 mt-0.5 block text-[12px] text-ink-muted">{season.title}</span>
+                    ) : null}
                   </span>
+                  <span className="shrink-0 text-[11.5px] text-ink-faint">
+                    {season.count} {season.count === 1 ? 'Episode' : 'Episodes'}
+                  </span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className={cn(
+                      'h-4 w-4 shrink-0 transition-transform duration-200',
+                      expanded ? 'rotate-90 text-brand-bright' : 'text-ink-faint',
+                    )}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.2}
+                    aria-hidden="true"
+                  >
+                    <path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
 
-                  {isCurrent ? (
-                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-brand-bright">
-                      Now
-                    </span>
-                  ) : null}
-                </Link>
+                <div id={panelId} hidden={!expanded}>
+                  {expanded ? episodesBlock : null}
+                </div>
               </li>
             );
           })}
