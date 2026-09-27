@@ -6,7 +6,14 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { authFetch, useAuthStore } from '@/lib/auth-store';
-import type { AdsConfig, AnimeCard, EpisodeProgress, EpisodeSummary, WatchPayload } from '@/lib/types';
+import type {
+  AdsConfig,
+  AnimeCard,
+  EpisodeNeighbour,
+  EpisodeProgress,
+  EpisodeSummary,
+  WatchPayload,
+} from '@/lib/types';
 import { cn, formatCount, typeLabel } from '@/lib/utils';
 import { AdSlot } from '@/components/ads/AdSlot';
 import { AnimeRail } from '@/components/anime/AnimeRail';
@@ -25,6 +32,24 @@ interface WatchClientProps {
 
 /** How often playback position is persisted while watching. */
 const PROGRESS_INTERVAL_MS = 15_000;
+
+
+/** True when stepping to this neighbour leaves the season being watched. */
+function crossesSeason(neighbour: EpisodeNeighbour, current: { season: { number: number } | null }): boolean {
+  if (!neighbour.season || !current.season) return false;
+  return neighbour.season.number !== current.season.number;
+}
+
+/**
+ * The tooltip for a Prev/Next button. It names the season only when the step
+ * crosses one, which keeps the common case short and makes a season boundary
+ * obvious before the click rather than after it.
+ */
+function neighbourLabel(neighbour: EpisodeNeighbour, current: { season: { number: number } | null }): string {
+  const where = crossesSeason(neighbour, current) && neighbour.season ? `Season ${neighbour.season.number} · ` : '';
+  const episode = `Episode ${neighbour.seasonEpisodeNumber}`;
+  return neighbour.title ? `${where}${episode} · ${neighbour.title}` : `${where}${episode}`;
+}
 
 export function WatchClient({ payload, episodes, recommendations }: WatchClientProps) {
   const router = useRouter();
@@ -187,7 +212,9 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
             {anime.titleEnglish}
           </Link>
           <span>/</span>
-          <span className="text-ink-soft">Episode {episode.number}</span>
+          <span className="text-ink-soft">
+            {episode.season ? `S${episode.season.number} · Episode ${episode.seasonEpisodeNumber}` : `Episode ${episode.number}`}
+          </span>
         </nav>
 
         <div className={cn('grid gap-6', theatre ? '' : 'xl:grid-cols-[minmax(0,1fr)_22rem]')}>
@@ -240,7 +267,10 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
                   {anime.titleEnglish}
                 </h1>
                 <p className="mt-0.5 text-[13.5px] text-ink-muted">
-                  Episode {episode.number}
+                  {/* Canonical numbering stays in the URL; what the viewer reads
+                      is where they are inside the season they chose. */}
+                  {episode.season ? `Season ${episode.season.number} · ` : ''}
+                  Episode {episode.seasonEpisodeNumber}
                   {episode.title ? ` · ${episode.title}` : ''}
                   {episode.isFiller ? ' · Filler' : ''}
                 </p>
@@ -255,18 +285,20 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
                   <button
                     type="button"
                     onClick={() => goToEpisode(navigation.previous!.number)}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[12.5px] font-semibold text-ink-soft transition hover:bg-surface-2 hover:text-ink"
+                    title={neighbourLabel(navigation.previous, episode)}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[12.5px] font-semibold text-ink-soft transition hover:bg-surface-2 hover:text-ink pointer-coarse:h-11"
                   >
-                    ← Prev
+                    ← {crossesSeason(navigation.previous, episode) ? `S${navigation.previous.season?.number}` : 'Prev'}
                   </button>
                 ) : null}
                 {navigation.next ? (
                   <button
                     type="button"
                     onClick={() => goToEpisode(navigation.next!.number)}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand px-3 text-[12.5px] font-semibold text-white transition hover:bg-brand-bright"
+                    title={neighbourLabel(navigation.next, episode)}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand px-3 text-[12.5px] font-semibold text-white transition hover:bg-brand-bright pointer-coarse:h-11"
                   >
-                    Next →
+                    {crossesSeason(navigation.next, episode) ? `S${navigation.next.season?.number}` : 'Next'} →
                   </button>
                 ) : null}
                 <button

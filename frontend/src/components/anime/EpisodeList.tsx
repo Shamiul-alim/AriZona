@@ -2,7 +2,7 @@
 
 import { SmartImage as Image } from '@/components/ui/SmartImage';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { EpisodeSummary } from '@/lib/types';
 import { cn, formatTime } from '@/lib/utils';
 
@@ -18,30 +18,76 @@ interface EpisodeListProps {
 const CHUNK_SIZE = 100;
 
 export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = false }: EpisodeListProps) {
+  const selectId = useId();
   const [search, setSearch] = useState('');
   const [layout, setLayout] = useState<'grid' | 'list'>(compact ? 'list' : 'list');
   const [rangeStart, setRangeStart] = useState(0);
 
+  /**
+   * Seasons come from the episodes themselves, so the list needs no second
+   * request. A title with no season records yields an empty array and
+   * everything below behaves exactly as it did before seasons existed.
+   */
+  const seasons = useMemo(() => {
+    const byId = new Map<string, { id: string; number: number; title: string | null; count: number }>();
+    for (const ep of episodes) {
+      if (!ep.seasonId) continue;
+      const existing = byId.get(ep.seasonId);
+      if (existing) existing.count += 1;
+      else byId.set(ep.seasonId, { id: ep.seasonId, number: ep.seasonNumber ?? 0, title: ep.seasonTitle, count: 1 });
+    }
+    return [...byId.values()].sort((a, b) => a.number - b.number);
+  }, [episodes]);
+
+  /** Episodes that belong to no season still have to be reachable. */
+  const unassigned = useMemo(() => episodes.filter((ep) => !ep.seasonId), [episodes]);
+
+  // On the watch page the sidebar should open on the season being watched.
+  const initialSeason =
+    seasons.find((s) => episodes.some((ep) => ep.seasonId === s.id && ep.number === currentEpisode))?.id ??
+    seasons[0]?.id ??
+    null;
+  const [seasonId, setSeasonId] = useState<string | null>(initialSeason);
+  const activeSeasonId = seasons.some((s) => s.id === seasonId) ? seasonId : initialSeason;
+
+  /**
+   * Only the chosen season is rendered — switching seasons is a state change,
+   * not a navigation, and no hidden episode tree is kept in the DOM.
+   */
+  const inSeason = useMemo(() => {
+    if (seasons.length === 0) return episodes;
+    if (!activeSeasonId) return unassigned;
+    const rows = episodes.filter((ep) => ep.seasonId === activeSeasonId);
+    // A title that mixes seasoned and unseasoned episodes shows the strays
+    // alongside the first season rather than hiding them.
+    return activeSeasonId === seasons[0]?.id ? [...rows, ...unassigned].sort((a, b) => a.number - b.number) : rows;
+  }, [episodes, seasons, activeSeasonId, unassigned]);
+
   const ranges = useMemo(() => {
-    if (episodes.length <= CHUNK_SIZE) return [];
+    if (inSeason.length <= CHUNK_SIZE) return [];
     const result: Array<{ start: number; label: string }> = [];
-    for (let i = 0; i < episodes.length; i += CHUNK_SIZE) {
-      const slice = episodes.slice(i, i + CHUNK_SIZE);
-      result.push({ start: i, label: `${slice[0].number} – ${slice[slice.length - 1].number}` });
+    for (let i = 0; i < inSeason.length; i += CHUNK_SIZE) {
+      const slice = inSeason.slice(i, i + CHUNK_SIZE);
+      result.push({
+        start: i,
+        label: `${slice[0].seasonEpisodeNumber} – ${slice[slice.length - 1].seasonEpisodeNumber}`,
+      });
     }
     return result;
-  }, [episodes]);
+  }, [inSeason]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const base =
-      ranges.length > 0 && !term ? episodes.slice(rangeStart, rangeStart + CHUNK_SIZE) : episodes;
+    const base = ranges.length > 0 && !term ? inSeason.slice(rangeStart, rangeStart + CHUNK_SIZE) : inSeason;
 
     if (!term) return base;
     return base.filter(
-      (ep) => String(ep.number).includes(term) || (ep.title ?? '').toLowerCase().includes(term),
+      (ep) =>
+        String(ep.seasonEpisodeNumber).includes(term) ||
+        String(ep.number).includes(term) ||
+        (ep.title ?? '').toLowerCase().includes(term),
     );
-  }, [episodes, search, ranges.length, rangeStart]);
+  }, [inSeason, search, ranges.length, rangeStart]);
 
   return (
     <div className="card-surface overflow-hidden">
@@ -88,6 +134,39 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
         ) : null}
       </div>
 
+      {seasons.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3 py-2.5">
+          {/* A native select is keyboard- and screen-reader-correct for free,
+              works the same on a phone as on a desktop, and does not care how
+              many seasons a title has. */}
+          <label htmlFor={selectId} className="text-[12px] font-semibold text-ink-soft">
+            Season
+          </label>
+          <select
+            id={selectId}
+            value={activeSeasonId ?? ''}
+            onChange={(e) => {
+              setSeasonId(e.target.value);
+              setRangeStart(0);
+            }}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-line-soft bg-base px-2.5 text-[13px] text-ink outline-none transition focus:border-brand/60 pointer-coarse:h-11 sm:flex-none"
+          >
+            {seasons.map((season) => (
+              <option key={season.id} value={season.id}>
+                {season.title ? `Season ${season.number} — ${season.title}` : `Season ${season.number}`} (
+                {season.count} {season.count === 1 ? 'episode' : 'episodes'})
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : seasons.length === 1 ? (
+        // One season needs no control, only the label, so the viewer still
+        // knows what they are looking at.
+        <p className="border-b border-line-soft px-3 py-2 text-[12px] font-semibold text-ink-soft">
+          {seasons[0].title ? `Season ${seasons[0].number} — ${seasons[0].title}` : `Season ${seasons[0].number}`}
+        </p>
+      ) : null}
+
       {ranges.length > 0 && !search ? (
         <div className="flex flex-wrap gap-1.5 border-b border-line-soft p-3">
           {ranges.map((range) => (
@@ -114,7 +193,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
             <Link
               key={ep.id}
               href={`/watch/${animeSlug}/ep-${ep.number}`}
-              title={ep.title ?? `Episode ${ep.number}`}
+              title={ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
               className={cn(
                 'grid h-10 place-items-center rounded-lg text-[13px] font-semibold transition',
                 currentEpisode === ep.number
@@ -122,7 +201,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
                   : 'bg-surface-2 text-ink-soft hover:bg-surface-3 hover:text-ink',
               )}
             >
-              {ep.number}
+              {ep.seasonEpisodeNumber}
             </Link>
           ))}
         </div>
@@ -146,7 +225,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
                       isCurrent ? 'text-brand-bright' : 'text-ink-faint',
                     )}
                   >
-                    {ep.number}
+                    {ep.seasonEpisodeNumber}
                   </span>
 
                   {!compact && ep.thumbnailUrl ? (
@@ -162,7 +241,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
                         isCurrent ? 'text-ink' : 'text-ink-soft group-hover/row:text-ink',
                       )}
                     >
-                      {ep.title ?? `Episode ${ep.number}`}
+                      {ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
                       {ep.hasSub ? (

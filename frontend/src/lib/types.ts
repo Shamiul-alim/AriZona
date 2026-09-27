@@ -61,6 +61,8 @@ export interface AnimeDetail extends Omit<AnimeCard, 'genres'> {
   source: string | null;
   favoriteCount: number;
   publishedEpisodeCount: number;
+  /** Empty for a title that does not use seasons. Ordered by season number. */
+  seasons: SeasonSummary[];
   seoTitle: string | null;
   seoDescription: string | null;
   studio: { id: string; name: string; slug: string } | null;
@@ -88,6 +90,7 @@ export interface FeaturedEntry {
 
 export interface EpisodeSummary {
   id: string;
+  /** Canonical, unique per anime, and what /watch/:slug/ep-:number uses. */
   number: number;
   title: string | null;
   thumbnailUrl: string | null;
@@ -97,6 +100,23 @@ export interface EpisodeSummary {
   hasDub: boolean;
   isFiller: boolean;
   viewCount: number;
+  /** Null for a title that does not use seasons. */
+  seasonId: string | null;
+  seasonNumber: number | null;
+  seasonTitle: string | null;
+  /**
+   * What the UI shows. Counts from 1 inside each season, and equals `number`
+   * when the episode belongs to no season. Never used to build a URL.
+   */
+  seasonEpisodeNumber: number;
+}
+
+export interface SeasonSummary {
+  id: string;
+  number: number;
+  title: string | null;
+  posterUrl: string | null;
+  episodeCount: number;
 }
 
 export interface LatestEpisode {
@@ -212,6 +232,17 @@ export interface ContinueWatchingItem {
   };
 }
 
+/**
+ * A neighbouring episode. `season` lets the page tell a step inside the season
+ * from a step across a season boundary.
+ */
+export interface EpisodeNeighbour {
+  number: number;
+  title: string | null;
+  season: { number: number; title: string | null } | null;
+  seasonEpisodeNumber: number;
+}
+
 export interface WatchPayload {
   anime: {
     id: string;
@@ -246,10 +277,14 @@ export interface WatchPayload {
     introEnd: number | null;
     outroStart: number | null;
     outroEnd: number | null;
+    /** Null for a title that does not use seasons. */
+    season: { id: string; number: number; title: string | null } | null;
+    /** What the page shows. Equals `number` when there is no season. */
+    seasonEpisodeNumber: number;
   };
   navigation: {
-    previous: { number: number; title: string | null } | null;
-    next: { number: number; title: string | null } | null;
+    previous: EpisodeNeighbour | null;
+    next: EpisodeNeighbour | null;
   };
   playback: {
     sources: PlaybackSource[];
