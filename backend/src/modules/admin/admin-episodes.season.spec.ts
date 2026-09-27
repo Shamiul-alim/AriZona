@@ -21,11 +21,7 @@ describe('AdminEpisodesService season assignment', () => {
         update: jest.fn().mockResolvedValue({ id: 'ep-1' }),
       },
     };
-    const service = new AdminEpisodesService(
-      prisma as never,
-      { refreshCounters: jest.fn() } as never,
-      ...([] as never[]),
-    );
+    const service = new AdminEpisodesService(prisma as never, { refreshCounters: jest.fn() } as never);
     return { service, prisma };
   }
 

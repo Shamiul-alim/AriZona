@@ -14,11 +14,15 @@ export class AdminSeasonsService {
 
   async list(animeId: string) {
     await this.assertAnime(animeId);
-    return this.prisma.season.findMany({
+    const rows = await this.prisma.season.findMany({
       where: { animeId },
       orderBy: { number: 'asc' },
       include: { _count: { select: { episodes: true } } },
     });
+    // Flattened to episodeCount so this matches the public anime payload.
+    // Leaking Prisma's _count shape meant every caller had to know about it,
+    // and a caller that read episodeCount silently got undefined.
+    return rows.map(({ _count, ...season }) => ({ ...season, episodeCount: _count.episodes }));
   }
 
   /**
