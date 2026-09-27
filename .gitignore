@@ -57,6 +57,17 @@ backups/*.dump
 # Personal notes, not part of the project
 Drive link.txt
 
+# Short-lived auth artifacts from local verification runs. These have all
+# existed at some point during development; ignoring them by pattern means a
+# future one cannot be committed by accident.
+.admtok
+*.admtok
+auth-state*.json
+storage-state*.json
+cookies*.json
+*.token
+*.tokens
+
 # Generated production credentials — never commit
 *.local.txt
 

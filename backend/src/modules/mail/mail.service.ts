@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { secretFingerprint } from 'src/common/redact';
 import nodemailer, { Transporter } from 'nodemailer';
 import { AppConfigService } from 'src/config/app-config.service';
 
@@ -284,6 +285,13 @@ export class MailService implements OnModuleInit {
       userSet: Boolean(m.user),
       userHint: m.user ? `${m.user.slice(0, 3)}***@${recipientDomain(m.user)}` : null,
       passwordSet: Boolean(m.password),
+      /**
+       * A fingerprint, never the key. After rotating the SMTP credential this is
+       * how an operator confirms the running process picked up the new value:
+       * the digest changes. The length is included because a wrong length is the
+       * usual sign of a truncated paste.
+       */
+      passwordFingerprint: secretFingerprint(m.password),
       fromName: m.fromName,
       fromAddress: m.fromAddress,
       /** Brevo only relays for a sender it has verified — worth seeing. */
