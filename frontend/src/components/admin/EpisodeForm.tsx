@@ -98,6 +98,13 @@ interface DownloadDraft {
   url: string;
 }
 
+interface SeasonOption {
+  id: string;
+  number: number;
+  title: string | null;
+  episodeCount: number;
+}
+
 interface AnimeOption {
   id: string;
   titleEnglish: string;
@@ -123,6 +130,8 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
 
   const [animeList, setAnimeList] = useState<AnimeOption[]>([]);
   const [animeId, setAnimeId] = useState(presetAnimeId ?? '');
+  const [seasons, setSeasons] = useState<SeasonOption[]>([]);
+  const [seasonId, setSeasonId] = useState('');
   const [number, setNumber] = useState('1');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -156,11 +165,36 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
       .catch(() => setAnimeList([]));
   }, []);
 
+  /**
+   * Seasons belong to one anime, so the list reloads whenever the title
+   * changes. The selector can then only offer seasons of the selected anime —
+   * which is also what the API enforces, so a stale choice is rejected rather
+   * than silently stored.
+   */
+  useEffect(() => {
+    if (!animeId) {
+      setSeasons([]);
+      return;
+    }
+    let active = true;
+    void authFetch<SeasonOption[]>(`/admin/anime/${animeId}/seasons`)
+      .then((rows) => {
+        if (active) setSeasons(rows);
+      })
+      .catch(() => {
+        if (active) setSeasons([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [animeId]);
+
   useEffect(() => {
     if (!episodeId) return;
     void authFetch<Record<string, unknown>>(`/admin/episodes/${episodeId}`)
       .then((data) => {
         setAnimeId(String((data.anime as { id: string }).id));
+        setSeasonId(data.seasonId ? String(data.seasonId) : '');
         setNumber(String(data.number ?? 1));
         setTitle(String(data.title ?? ''));
         setDescription(String(data.description ?? ''));
@@ -262,6 +296,9 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
 
     const payload: Record<string, unknown> = {
       animeId,
+      // Empty means "no season"; the API stores that as null, which is what
+      // every episode created before seasons existed already has.
+      seasonId: seasonId || null,
       number: Number(number),
       title: title.trim() || undefined,
       description: description.trim() || undefined,
@@ -380,7 +417,17 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
               <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_7rem]">
                 <label className="block">
                   <Label required>Anime</Label>
-                  <select value={animeId} onChange={(e) => setAnimeId(e.target.value)} className={adminSelect} required>
+                  <select
+                    value={animeId}
+                    onChange={(e) => {
+                      setAnimeId(e.target.value);
+                      // A season from the previous title would be rejected by
+                      // the API, so the choice is cleared with the title.
+                      setSeasonId('');
+                    }}
+                    className={adminSelect}
+                    required
+                  >
                     <option value="">Choose a title…</option>
                     {animeList.map((anime) => (
                       <option key={anime.id} value={anime.id}>
@@ -389,6 +436,23 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                     ))}
                   </select>
                 </label>
+
+                {/* Only shown when the chosen title actually has seasons, so a
+                    series without them keeps the form it has always had. */}
+                {seasons.length > 0 ? (
+                  <label className="block">
+                    <Label hint="Optional. Leave unassigned to keep the episode outside every season.">Season</Label>
+                    <select value={seasonId} onChange={(e) => setSeasonId(e.target.value)} className={adminSelect}>
+                      <option value="">No season</option>
+                      {seasons.map((season) => (
+                        <option key={season.id} value={season.id}>
+                          Season {season.number}
+                          {season.title ? ` — ${season.title}` : ''} ({season.episodeCount})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
 
                 <label className="block">
                   <Label required hint="7.5 is valid">
