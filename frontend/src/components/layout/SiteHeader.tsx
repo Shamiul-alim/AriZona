@@ -9,6 +9,7 @@ import { apiFetch, qs } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import type { AnimeCard, GenreRef, Paginated } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { menuItem, menuPanel, useMenuEscape } from '@/components/ui/Menu';
 import { Logo } from './Logo';
 
 const BROWSE_LINKS = [
@@ -51,6 +52,13 @@ export function SiteHeader() {
   const searchRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
   const accountRef = useRef<HTMLDivElement | null>(null);
+  const accountTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  // A keyboard user could open these menus but had no way to close them without
+  // tabbing out; Escape now closes whichever one is open and hands focus back.
+  useMenuEscape(openMenu !== null, () => setOpenMenu(null), accountTriggerRef);
+  useMenuEscape(searchOpen, () => setSearchOpen(false));
+  useMenuEscape(mobileOpen, () => setMobileOpen(false));
 
   useEffect(() => {
     apiFetch<GenreRef[]>('/genres')
@@ -251,7 +259,7 @@ export function SiteHeader() {
             </form>
 
             {searchOpen && searchTerm(query) ? (
-              <div className="absolute right-0 top-11 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
+              <div className={cn('absolute right-0 top-11 w-[min(24rem,calc(100vw-2rem))]', menuPanel)}>
                 {searching ? (
                   <p className="px-4 py-6 text-center text-[13px] text-ink-faint">Searching…</p>
                 ) : results.length === 0 ? (
@@ -300,6 +308,9 @@ export function SiteHeader() {
                 onClick={() => toggleMenu('account')}
                 className="flex h-9 items-center gap-2 rounded-full border border-line-soft bg-surface/80 pl-1 pr-2.5 transition hover:border-brand/50 pointer-coarse:h-11"
                 aria-label="Account menu"
+                aria-haspopup="menu"
+                aria-expanded={openMenu === 'account'}
+                ref={accountTriggerRef}
               >
                 <span className="relative h-7 w-7 overflow-hidden rounded-full bg-surface-3">
                   {user.avatarUrl ? (
@@ -312,7 +323,7 @@ export function SiteHeader() {
               </button>
 
               {openMenu === 'account' ? (
-                <div className="absolute right-0 top-11 w-56 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-2xl">
+                <div role="menu" className={cn('absolute right-0 top-11 w-56 py-1', menuPanel)}>
                   <div className="border-b border-line-soft px-3.5 py-2.5">
                     <p className="truncate text-[13px] font-semibold text-ink">{user.displayName ?? user.username}</p>
                     <p className="text-[11px] text-accent">{user.mana.toLocaleString()} Mana</p>
@@ -331,7 +342,7 @@ export function SiteHeader() {
                   <button
                     type="button"
                     onClick={() => void handleLogout()}
-                    className="w-full px-3.5 py-2 text-left text-[13px] text-danger transition hover:bg-white/6"
+                    className={cn(menuItem, 'text-danger hover:text-danger focus-visible:text-danger')}
                   >
                     Sign out
                   </button>
@@ -483,7 +494,7 @@ function DropdownTrigger({
         </svg>
       </button>
       {open ? (
-        <div className="absolute left-0 top-11 z-50 animate-fade-up overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
+        <div className={cn('absolute left-0 top-11 animate-fade-up', menuPanel)}>
           {children}
         </div>
       ) : null}
@@ -493,7 +504,7 @@ function DropdownTrigger({
 
 function MenuLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <Link href={href} className="block px-3.5 py-2 text-[13px] text-ink-soft transition hover:bg-white/6 hover:text-ink">
+    <Link href={href} className={menuItem}>
       {children}
     </Link>
   );

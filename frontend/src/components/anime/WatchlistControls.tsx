@@ -1,10 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authFetch, useAuthStore } from '@/lib/auth-store';
 import type { WatchStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { menuItem, menuItemActive, menuPanel, useMenuEscape } from '@/components/ui/Menu';
 
 const STATUS_OPTIONS: Array<{ value: WatchStatus; label: string }> = [
   { value: 'WATCHING', label: 'Watching' },
@@ -80,15 +81,32 @@ export function WatchlistControls({ slug, initialStatus, initialFavorite }: Watc
 
   const activeLabel = STATUS_OPTIONS.find((o) => o.value === status)?.label;
 
+  // This menu had neither click-outside nor Escape: once open it stayed open.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useMenuEscape(open, () => setOpen(false), triggerRef);
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [open]);
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
-        <div className="relative">
+        <div ref={panelRef} className="relative">
           <button
             type="button"
+            ref={triggerRef}
             onClick={() => (requireAuth() ? setOpen((v) => !v) : undefined)}
             disabled={busy}
             aria-expanded={open}
+            aria-haspopup="menu"
             className={cn(
               'inline-flex h-10 items-center gap-2 rounded-xl px-4 text-[13.5px] font-semibold transition disabled:opacity-60',
               status ? 'bg-brand text-white hover:bg-brand-bright' : 'border border-line bg-surface text-ink hover:bg-surface-2',
@@ -104,16 +122,15 @@ export function WatchlistControls({ slug, initialStatus, initialFavorite }: Watc
           </button>
 
           {open ? (
-            <div className="absolute left-0 top-12 z-30 w-52 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-2xl">
+            <div role="menu" className={cn('absolute left-0 top-12 w-52 py-1', menuPanel)}>
               {STATUS_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
                   onClick={() => void changeStatus(option.value)}
-                  className={cn(
-                    'block w-full px-3.5 py-2 text-left text-[13px] transition hover:bg-white/6',
-                    status === option.value ? 'font-semibold text-accent' : 'text-ink-soft',
-                  )}
+                  role="menuitemradio"
+                  aria-checked={status === option.value}
+                  className={status === option.value ? menuItemActive : menuItem}
                 >
                   {option.label}
                 </button>
