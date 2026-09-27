@@ -140,6 +140,38 @@
 }
 
 @layer components {
+  /**
+   * Native <select>, dressed to match the text inputs beside it.
+   *
+   * The element stays a real <select> on purpose: it keeps full keyboard
+   * behaviour for free and opens the OS picker on a phone, which is a better
+   * experience than any custom menu. Only the browser chrome is replaced — the
+   * default arrow is removed and redrawn as a background image, so the control
+   * looks the same in every browser without a wrapper element or a line of JS.
+   *
+   * The right padding is what stops a long option label running under the
+   * chevron; do not reduce it below the chevron inset.
+   */
+  .select-field {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237e849e' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 1.05rem 1.05rem;
+  }
+  .select-field:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  /* The options list itself is drawn by the OS. Naming the colours keeps it
+     from rendering as white-on-white where the platform honours them. */
+  .select-field option,
+  .select-field optgroup {
+    background: var(--color-surface);
+    color: var(--color-ink);
+  }
+
   /* Horizontal rails hide their scrollbar but stay fully keyboard/touch
      scrollable. */
   .rail {

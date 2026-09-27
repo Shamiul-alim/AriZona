@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
+import { selectField } from '@/components/ui/Select';
 
 const CATEGORIES = [
   { value: 'GENERAL', label: 'General enquiry' },
@@ -101,7 +102,7 @@ export function ContactForm() {
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="h-11 w-full rounded-lg border border-line-soft bg-base px-3 text-[14px] text-ink outline-none focus:border-brand/60"
+          className={selectField}
         >
           {CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>

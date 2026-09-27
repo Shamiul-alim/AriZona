@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { authFetch, useAuthStore } from '@/lib/auth-store';
 import { SUBTITLE_SIZES, usePlayerPreferences } from '@/components/player/usePlayerPreferences';
 import { cn } from '@/lib/utils';
+import { selectField } from '@/components/ui/Select';
 
 interface AccountPreferences {
   titlePreference: 'ENGLISH' | 'JAPANESE';
@@ -211,7 +212,7 @@ export default function SettingsPage() {
                 <select
                   value={account.preferredAudio ?? 'ja'}
                   onChange={(e) => void savePreferences({ preferredAudio: e.target.value })}
-                  className="h-11 w-full rounded-lg border border-line-soft bg-base px-3 text-[14px] text-ink outline-none focus:border-brand/60"
+                  className={selectField}
                 >
                   <option value="ja">Japanese (SUB)</option>
                   <option value="en">English (DUB)</option>
@@ -223,7 +224,7 @@ export default function SettingsPage() {
                 <select
                   value={account.preferredSubtitle ?? 'en'}
                   onChange={(e) => void savePreferences({ preferredSubtitle: e.target.value })}
-                  className="h-11 w-full rounded-lg border border-line-soft bg-base px-3 text-[14px] text-ink outline-none focus:border-brand/60"
+                  className={selectField}
                 >
                   <option value="en">English</option>
                   <option value="bn">Bangla</option>

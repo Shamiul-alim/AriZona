@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { selectClass } from '@/components/ui/Select';
 
 /** Small shared kit so every admin screen looks and behaves the same. */
 
@@ -25,13 +26,18 @@ export function AdminHeader({
 }
 
 export const adminInput =
-  'h-10 w-full rounded-lg border border-line-soft bg-base px-3 text-[13.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-brand/60';
+  // pointer-coarse matches the select beside it, so a phone gets a 44px row for
+  // both rather than a 44px dropdown next to a 40px field.
+  'h-10 w-full rounded-lg border border-line-soft bg-base px-3 text-[13.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-brand/60 pointer-coarse:h-11';
 
 export const adminTextarea =
   'w-full resize-y rounded-lg border border-line-soft bg-base px-3 py-2.5 text-[13.5px] leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-brand/60';
 
-export const adminSelect =
-  'h-10 w-full rounded-lg border border-line-soft bg-base px-3 text-[13.5px] text-ink outline-none focus:border-brand/60';
+/**
+ * The admin select. Delegates to the shared appearance so admin and public
+ * dropdowns cannot drift apart, at the height that matches `adminInput`.
+ */
+export const adminSelect = selectClass('admin');
 
 export function Label({
   children,

@@ -6,6 +6,14 @@ import { apiFetch } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import type { GenreRef } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { selectFieldSm } from '@/components/ui/Select';
+
+/**
+ * The text-input twin of selectFieldSm: same height, border and surface, but no
+ * chevron — these are numbers to type, not a list to choose from.
+ */
+const filterInputSm =
+  'h-9 w-full rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none transition hover:border-line focus:border-brand/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 pointer-coarse:h-11';
 
 const TYPES = ['TV', 'MOVIE', 'OVA', 'ONA', 'SPECIAL', 'TV_SHORT', 'TV_SPECIAL', 'MUSIC'];
 const STATUSES = ['ONGOING', 'COMPLETED', 'UPCOMING', 'HIATUS', 'CANCELLED'];
@@ -165,7 +173,7 @@ export function FilterPanel({ years }: { years: number[] }) {
           value={current.sort}
           onChange={(e) => push({ sort: e.target.value === 'default' ? undefined : e.target.value })}
           aria-label="Sort by"
-          className="h-10 rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none focus:border-brand/60"
+          className={selectFieldSm}
         >
           {SORTS.map((s) => (
             <option key={s.value} value={s.value}>
@@ -258,7 +266,7 @@ export function FilterPanel({ years }: { years: number[] }) {
                 value={current.year}
                 onChange={(e) => push({ year: e.target.value || undefined })}
                 aria-label="Release year"
-                className="h-9 w-full rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none focus:border-brand/60"
+                className={selectFieldSm}
               >
                 <option value="">Any year</option>
                 {years.map((y) => (
@@ -320,7 +328,7 @@ export function FilterPanel({ years }: { years: number[] }) {
                   defaultValue={current.minEpisodes}
                   onBlur={(e) => push({ minEpisodes: e.target.value || undefined })}
                   aria-label="Minimum episodes"
-                  className="h-9 w-full rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none focus:border-brand/60"
+                  className={filterInputSm}
                 />
                 <span className="text-ink-faint">–</span>
                 <input
@@ -330,7 +338,7 @@ export function FilterPanel({ years }: { years: number[] }) {
                   defaultValue={current.maxEpisodes}
                   onBlur={(e) => push({ maxEpisodes: e.target.value || undefined })}
                   aria-label="Maximum episodes"
-                  className="h-9 w-full rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none focus:border-brand/60"
+                  className={filterInputSm}
                 />
               </div>
             </Group>

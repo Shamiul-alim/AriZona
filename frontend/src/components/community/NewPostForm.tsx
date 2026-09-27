@@ -7,6 +7,7 @@ import { apiFetch, qs } from '@/lib/api';
 import { authFetch, useAuthStore } from '@/lib/auth-store';
 import type { AnimeCard, CommunityCategory, CommunityPostKind, Paginated } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { selectField, selectFieldSm } from '@/components/ui/Select';
 
 const KINDS: Array<{ value: CommunityPostKind; label: string; hint: string }> = [
   { value: 'TEXT', label: 'Discussion', hint: 'A normal post.' },
@@ -191,7 +192,7 @@ export function NewPostForm({ categories }: { categories: CommunityCategory[] })
           <select
             value={categorySlug}
             onChange={(e) => setCategorySlug(e.target.value)}
-            className="h-10 w-full rounded-lg border border-line-soft bg-base px-3 text-[13.5px] text-ink outline-none focus:border-brand/60"
+            className={selectField}
           >
             {postable.map((c) => (
               <option key={c.id} value={c.slug}>
@@ -354,7 +355,7 @@ export function NewPostForm({ categories }: { categories: CommunityCategory[] })
                       setTiers((previous) => ({ ...previous, [item.id]: e.target.value as (typeof TIERS)[number] }))
                     }
                     aria-label={`Tier for ${item.title}`}
-                    className="h-8 rounded-lg border border-line-soft bg-surface px-2 text-[12.5px] text-ink outline-none focus:border-brand/60"
+                    className={selectFieldSm}
                   >
                     {TIERS.map((tier) => (
                       <option key={tier} value={tier}>

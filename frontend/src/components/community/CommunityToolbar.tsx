@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { selectFieldSm } from '@/components/ui/Select';
 
 const SORTS = [
   { value: 'newest', label: 'Newest' },
@@ -79,7 +80,7 @@ export function CommunityToolbar() {
         value={kind}
         onChange={(e) => push({ kind: e.target.value || undefined })}
         aria-label="Post type"
-        className="h-9 rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none focus:border-brand/60"
+        className={selectFieldSm}
       >
         {KINDS.map((k) => (
           <option key={k.value} value={k.value}>
