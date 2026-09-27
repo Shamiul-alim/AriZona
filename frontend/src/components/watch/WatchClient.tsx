@@ -204,11 +204,14 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
       <div className={cn('mx-auto px-4 py-5 md:px-6', theatre ? 'max-w-[1800px]' : 'max-w-[1600px]')}>
         {/* Breadcrumb */}
         <nav className="mb-3 flex flex-wrap items-center gap-1.5 text-[12.5px] text-ink-faint" aria-label="Breadcrumb">
-          <Link href="/" className="transition hover:text-ink-soft">
+          <Link href="/" className="-my-2 inline-block py-2 transition hover:text-ink-soft pointer-coarse:-my-3 pointer-coarse:py-3">
             Home
           </Link>
           <span>/</span>
-          <Link href={`/anime/${anime.slug}`} className="transition hover:text-ink-soft">
+          <Link
+            href={`/anime/${anime.slug}`}
+            className="-my-2 inline-block py-2 transition hover:text-ink-soft pointer-coarse:-my-3 pointer-coarse:py-3"
+          >
             {anime.titleEnglish}
           </Link>
           <span>/</span>
@@ -306,6 +309,7 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
                   onClick={() => setTheatre((v) => !v)}
                   className={cn(
                     'hidden h-9 items-center rounded-lg px-3 text-[12.5px] font-semibold transition md:inline-flex',
+                    'pointer-coarse:h-11',
                     theatre ? 'bg-brand text-white' : 'border border-line bg-surface text-ink-soft hover:text-ink',
                   )}
                 >

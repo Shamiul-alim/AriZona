@@ -124,6 +124,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
                 aria-pressed={layout === option}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-[12px] font-medium transition',
+                  'pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center',
                   layout === option ? 'bg-brand text-white' : 'text-ink-muted hover:text-ink',
                 )}
               >

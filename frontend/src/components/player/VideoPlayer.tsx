@@ -497,7 +497,7 @@ export function VideoPlayer({
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
         <iframe
           src={activeSource.embedUrl}
-          title={`${payload.anime.titleEnglish} episode ${episode.number}`}
+          title={`${payload.anime.titleEnglish} episode ${episode.seasonEpisodeNumber}`}
           className="h-full w-full"
           allow="autoplay; fullscreen; encrypted-media"
           allowFullScreen
@@ -626,7 +626,7 @@ export function VideoPlayer({
               onClick={(e) => e.stopPropagation()}
             >
               <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-                Episode {episode.number}
+                Episode {episode.seasonEpisodeNumber}
                 {episode.title ? ` · ${episode.title}` : ''}
               </p>
               <p id="resume-title" className="mt-1.5 text-[15px] font-semibold text-ink">
@@ -680,7 +680,7 @@ export function VideoPlayer({
               </span>
               <span className="text-center">
                 <span className="block text-sm font-semibold text-ink">
-                  Episode {episode.number}
+                  Episode {episode.seasonEpisodeNumber}
                   {episode.title ? ` · ${episode.title}` : ''}
                 </span>
                 {resume?.completed ? (
@@ -777,7 +777,7 @@ export function VideoPlayer({
         <div className="absolute bottom-24 right-4 z-30 w-64 animate-fade-up rounded-xl border border-white/15 bg-black/85 p-3 backdrop-blur">
           <p className="text-[11px] uppercase tracking-wide text-ink-faint">Up next</p>
           <p className="mt-0.5 line-clamp-2 text-[13px] font-semibold text-ink">
-            Episode {navigation.next.number}
+            Episode {navigation.next.seasonEpisodeNumber}
             {navigation.next.title ? ` · ${navigation.next.title}` : ''}
           </p>
           <div className="mt-2.5 flex gap-2">
