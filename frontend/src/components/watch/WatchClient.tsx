@@ -385,7 +385,13 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
               <div className="card-surface overflow-hidden">
                 <div className="flex gap-3 p-3.5">
                   {anime.posterUrl ? (
-                    <Link href={`/anime/${anime.slug}`} className="relative h-28 w-20 shrink-0 overflow-hidden rounded-lg bg-surface-2">
+                    <Link
+                      href={`/anime/${anime.slug}`}
+                      // The poster is decorative (alt=""), so without this the
+                      // link has no accessible name at all.
+                      aria-label={anime.titleEnglish}
+                      className="relative h-28 w-20 shrink-0 overflow-hidden rounded-lg bg-surface-2"
+                    >
                       <Image src={anime.posterUrl} alt="" fill sizes="80px" className="object-cover" />
                     </Link>
                   ) : null}
