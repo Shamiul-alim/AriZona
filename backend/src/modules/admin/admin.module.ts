@@ -9,7 +9,14 @@ import { AdminUsersService } from './admin-users.service';
 
 @Module({
   controllers: [AdminController],
-  providers: [AdminAnimeService, AdminEpisodesService, AdminUsersService, AdminTaxonomyService, AdminSeasonsService],
+  providers: [
+    AdminAnimeService,
+    AdminEpisodesService,
+    AdminUsersService,
+    AdminTaxonomyService,
+    AdminSeasonsService,
+    AdminMediaJobsService,
+  ],
   exports: [AdminAnimeService, AdminEpisodesService],
 })
 export class AdminModule {}
