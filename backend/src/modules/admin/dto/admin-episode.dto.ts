@@ -258,6 +258,17 @@ export class MediaSourceDto {
   @IsBoolean()
   isActive?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      "SINGLE_MASTER: the one Drive file or share URL every rendition, audio track and subtitle is derived from. " +
+      "Setting it queues the source for the local worker; the admin supplies nothing else. " +
+      "Leave empty for MANUAL_VARIANTS, where the admin supplies each file.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  masterDriveFileIdOrUrl?: string;
+
   @ApiPropertyOptional({ type: [MediaVariantDto] })
   @IsOptional()
   @IsArray()

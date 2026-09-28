@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { MediaProvider, Prisma, PublishStatus, SubtitleFormat } from '@prisma/client';
+import { MediaProvider, Prisma, PublishStatus, SubtitleFormat, MediaProcessingState } from '@prisma/client';
 import { paginate } from 'src/common/dto/pagination.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { GoogleDriveProvider } from '../media/providers/google-drive.provider';
@@ -176,9 +176,27 @@ export class AdminEpisodesService {
         for (const [index, source] of dto.mediaSources.entries()) {
           this.assertSourcePayload(source);
 
+          // A master turns this source into a job for the local worker. The
+          // state is set here rather than inferred later, so an admin who
+          // edits the media of a SINGLE_MASTER episode re-queues it instead of
+          // silently leaving stale renditions behind. The worker marks it READY
+          // once every expected step has actually completed.
+          const masterDriveFileId = source.masterDriveFileIdOrUrl
+            ? GoogleDriveProvider.extractFileId(source.masterDriveFileIdOrUrl)
+            : null;
+          if (source.masterDriveFileIdOrUrl && !masterDriveFileId) {
+            throw new BadRequestException(
+              `Could not read a Drive file ID from "${source.masterDriveFileIdOrUrl}". Paste the share link or the file ID.`,
+            );
+          }
+
           const created = await tx.mediaSource.create({
             data: {
               episodeId,
+              masterDriveFileId,
+              processingState: masterDriveFileId
+                ? MediaProcessingState.PENDING
+                : MediaProcessingState.NOT_APPLICABLE,
               label: source.label,
               provider: source.provider,
               kind: source.kind,

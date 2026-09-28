@@ -43,6 +43,8 @@ interface SourceDraft {
   hlsUrl: string;
   embedUrl: string;
   isDefault: boolean;
+  /** SINGLE_MASTER: the one Drive file the worker derives everything from. */
+  masterDriveFileIdOrUrl: string;
   variants: VariantDraft[];
 }
 
@@ -120,6 +122,7 @@ function newSource(index: number): SourceDraft {
     hlsUrl: '',
     embedUrl: '',
     isDefault: index === 0,
+    masterDriveFileIdOrUrl: '',
     variants: [{ quality: 'Q_1080P', driveFileIdOrUrl: '', directUrl: '', isDefault: false }],
   };
 }
@@ -222,6 +225,7 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                 hlsUrl: String(source.hlsUrl ?? ''),
                 embedUrl: String(source.embedUrl ?? ''),
                 isDefault: Boolean(source.isDefault),
+                masterDriveFileIdOrUrl: String(source.masterDriveFileId ?? ''),
                 variants: ((source.variants as Array<Record<string, unknown>>) ?? []).map((v) => ({
                   quality: String(v.quality ?? 'Q_720P'),
                   driveFileIdOrUrl: String(v.driveFileId ?? ''),
@@ -322,7 +326,12 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
         hlsUrl: source.provider === 'HLS' ? source.hlsUrl : undefined,
         embedUrl: source.provider === 'EXTERNAL_EMBED' ? source.embedUrl : undefined,
         isDefault: source.isDefault,
-        variants: PROVIDERS.find((p) => p.value === source.provider)?.needsVariants
+        masterDriveFileIdOrUrl: source.masterDriveFileIdOrUrl.trim() || undefined,
+        // With a master the worker owns the renditions; sending hand-typed ones
+        // would fight it. Without one this is the unchanged manual path.
+        variants: source.masterDriveFileIdOrUrl.trim()
+          ? []
+          : PROVIDERS.find((p) => p.value === source.provider)?.needsVariants
           ? source.variants
               .filter((v) => v.driveFileIdOrUrl.trim() || v.directUrl.trim())
               .map((v) => ({
@@ -677,7 +686,74 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                       </label>
                     ) : null}
 
+                    {/* SINGLE_MASTER vs MANUAL_VARIANTS. The mode is not a stored
+                        field: a source with a master is a SINGLE_MASTER source,
+                        which keeps one fact in one place. */}
                     {providerMeta?.needsVariants ? (
+                      <div className="mt-3 rounded-lg border border-line-soft bg-base/50 p-3">
+                        <Label hint="One master file, or one file per quality that you supply yourself.">
+                          Media mode
+                        </Label>
+                        <div className="mt-1.5 flex flex-wrap gap-2">
+                          {(
+                            [
+                              { key: 'single', label: 'SINGLE_MASTER', hint: 'One master, processed automatically' },
+                              { key: 'manual', label: 'MANUAL_VARIANTS', hint: 'You supply each quality' },
+                            ] as const
+                          ).map((mode) => {
+                            const active =
+                              mode.key === 'single'
+                                ? Boolean(source.masterDriveFileIdOrUrl.trim())
+                                : !source.masterDriveFileIdOrUrl.trim();
+                            return (
+                              <button
+                                key={mode.key}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() =>
+                                  updateSource(sourceIndex, {
+                                    masterDriveFileIdOrUrl:
+                                      mode.key === 'single' ? source.masterDriveFileIdOrUrl || ' ' : '',
+                                  })
+                                }
+                                className={cn(
+                                  'rounded-lg border px-3 py-2 text-left text-[12.5px] transition',
+                                  active
+                                    ? 'border-brand/60 bg-brand/15 font-semibold text-ink'
+                                    : 'border-line-soft text-ink-muted hover:bg-white/5 hover:text-ink',
+                                )}
+                              >
+                                <span className="block">{mode.label}</span>
+                                <span className="block text-[11px] font-normal text-ink-faint">{mode.hint}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {source.masterDriveFileIdOrUrl.trim() ? (
+                          <label className="mt-3 block">
+                            <Label
+                              required
+                              hint="Paste the Drive share link or file ID. The local worker probes it and builds every quality, audio track and subtitle from it — you do not add them by hand."
+                            >
+                              Master Drive URL
+                            </Label>
+                            <input
+                              value={source.masterDriveFileIdOrUrl.trim()}
+                              onChange={(e) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: e.target.value })}
+                              placeholder="https://drive.google.com/file/d/…"
+                              className={adminInput}
+                            />
+                            <span className="mt-1.5 block text-[11.5px] leading-relaxed text-ink-faint">
+                              Saving queues this episode. Run <code className="text-ink-muted">npm run media:worker</code>{' '}
+                              on the machine with FFmpeg to process it.
+                            </span>
+                          </label>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {providerMeta?.needsVariants && !source.masterDriveFileIdOrUrl.trim() ? (
                       <div className="mt-3">
                         <div className="mb-2 flex items-center justify-between">
                           <Label hint="Each quality is a separate file for this provider. That is what makes quality switching work.">

@@ -31,6 +31,8 @@ import { MediaProviderRegistry } from '../media/media-provider.registry';
 import { AdminAnimeService } from './admin-anime.service';
 import { AdminEpisodesService } from './admin-episodes.service';
 import { AdminSeasonsService } from './admin-seasons.service';
+import { AdminMediaJobsService } from './admin-media-jobs.service';
+import { CompleteMediaJobDto } from './dto/admin-media-job.dto';
 import { AdminTaxonomyService } from './admin-taxonomy.service';
 import { AdminUsersService } from './admin-users.service';
 import { AdminAnimeQueryDto, CreateAnimeDto, UpdateAnimeDto } from './dto/admin-anime.dto';
@@ -94,6 +96,7 @@ export class AdminController {
     private readonly usersService: AdminUsersService,
     private readonly taxonomy: AdminTaxonomyService,
     private readonly seasonsService: AdminSeasonsService,
+    private readonly mediaJobs: AdminMediaJobsService,
     private readonly analytics: AnalyticsService,
     private readonly mediaRegistry: MediaProviderRegistry,
   ) {}
@@ -109,6 +112,32 @@ export class AdminController {
       this.analytics.popularAnime(8),
     ]);
     return { stats, viewSeries: series, popularAnime: popular, mediaProviders: this.mediaRegistry.status() };
+  }
+
+  // --- SINGLE_MASTER media jobs ---------------------------------------------
+
+  @Get("media/jobs")
+  @ApiOperation({ summary: "SINGLE_MASTER sources awaiting the local worker" })
+  pendingMediaJobs(@Query("limit") limit = "20") {
+    return this.mediaJobs.pending(Number(limit) || 20);
+  }
+
+  @Post("media/jobs/:id/claim")
+  @ApiOperation({ summary: "Take ownership of a job. Null when another worker already has it." })
+  claimMediaJob(@Param("id", ParseUUIDPipe) id: string) {
+    return this.mediaJobs.claim(id);
+  }
+
+  @Post("media/jobs/:id/complete")
+  @ApiOperation({ summary: "Report the outcome. Ready is refused until renditions exist." })
+  completeMediaJob(@Param("id", ParseUUIDPipe) id: string, @Body() dto: CompleteMediaJobDto) {
+    return this.mediaJobs.complete(id, dto.ready, dto.error);
+  }
+
+  @Get("episodes/:id/media-status")
+  @ApiOperation({ summary: "What has been built for this episode so far" })
+  mediaStatus(@Param("id", ParseUUIDPipe) id: string) {
+    return this.mediaJobs.statusForEpisode(id);
   }
 
   // --- Seasons --------------------------------------------------------------

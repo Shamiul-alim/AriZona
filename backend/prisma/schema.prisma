@@ -20,7 +20,7 @@
 // =============================================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   // Loads relations with a LATERAL JOIN instead of one extra round trip per
   // relation. The API server and the database are in different regions, so a
   // round trip costs ~300ms: an endpoint including five relations spent well
@@ -29,7 +29,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // Runtime queries go through the pooled connection (PgBouncer, port 6543 on
   // Supabase). Migrations cannot run over a transaction-mode pooler, so they
   // use the direct session connection instead. Locally both point at the same
@@ -273,17 +273,17 @@ enum AdType {
 // ============================================================================
 
 model User {
-  id            String     @id @default(uuid()) @db.Uuid
-  email         String     @unique
-  username      String     @unique
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique
+  username     String     @unique
   /// Null for accounts created purely through Google OAuth.
-  passwordHash  String?
-  displayName   String?
-  avatarUrl     String?
-  bannerUrl     String?
-  bio           String?    @db.VarChar(500)
-  role          UserRole   @default(USER)
-  status        UserStatus @default(ACTIVE)
+  passwordHash String?
+  displayName  String?
+  avatarUrl    String?
+  bannerUrl    String?
+  bio          String?    @db.VarChar(500)
+  role         UserRole   @default(USER)
+  status       UserStatus @default(ACTIVE)
 
   emailVerifiedAt DateTime?
   googleId        String?   @unique
@@ -320,8 +320,8 @@ model User {
   ratings            Rating[]
   comments           Comment[]
   commentVotes       CommentVote[]
-  reportsFiled       Report[]                @relation("ReportAuthor")
-  reportsResolved    Report[]                @relation("ReportResolver")
+  reportsFiled       Report[]                 @relation("ReportAuthor")
+  reportsResolved    Report[]                 @relation("ReportResolver")
   communityPosts     CommunityPost[]
   communityComments  CommunityComment[]
   communityVotes     CommunityVote[]
@@ -356,9 +356,9 @@ model RefreshToken {
 }
 
 model PasswordResetToken {
-  id     String @id @default(uuid()) @db.Uuid
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// SHA-256 of "<userId>:<code>". The code itself is never stored, and
   /// binding it to the user means two people can hold the same six digits
   /// without colliding on this unique index.
@@ -411,24 +411,24 @@ model Rank {
 // ============================================================================
 
 model Anime {
-  id             String  @id @default(uuid()) @db.Uuid
-  slug           String  @unique
-  titleEnglish   String
-  titleJapanese  String?
-  titleRomaji    String?
-  synopsis       String?
-  posterUrl      String?
-  bannerUrl      String?
-  trailerUrl     String?
+  id            String  @id @default(uuid()) @db.Uuid
+  slug          String  @unique
+  titleEnglish  String
+  titleJapanese String?
+  titleRomaji   String?
+  synopsis      String?
+  posterUrl     String?
+  bannerUrl     String?
+  trailerUrl    String?
 
-  type       AnimeType    @default(TV)
-  status     AnimeStatus  @default(ONGOING)
-  season     AnimeSeason?
-  releaseYear Int?
+  type         AnimeType    @default(TV)
+  status       AnimeStatus  @default(ONGOING)
+  season       AnimeSeason?
+  releaseYear  Int?
   airStartDate DateTime?
   airEndDate   DateTime?
-  ageRating  AgeRating?
-  source     AnimeSource? @default(ORIGINAL)
+  ageRating    AgeRating?
+  source       AnimeSource? @default(ORIGINAL)
 
   /// Average episode runtime in minutes.
   durationMinutes Int?
@@ -463,28 +463,28 @@ model Anime {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  titles          AnimeTitle[]
-  genres          AnimeGenre[]
-  producers       AnimeProducer[]
-  seasons         Season[]
-  episodes        Episode[]
-  relationsFrom   AnimeRelation[]        @relation("RelationSource")
-  relationsTo     AnimeRelation[]        @relation("RelationTarget")
-  recommendsFrom  AnimeRecommendation[]  @relation("RecommendSource")
-  recommendsTo    AnimeRecommendation[]  @relation("RecommendTarget")
-  watchProgress   WatchProgress[]
-  watchHistory    WatchHistory[]
+  titles           AnimeTitle[]
+  genres           AnimeGenre[]
+  producers        AnimeProducer[]
+  seasons          Season[]
+  episodes         Episode[]
+  relationsFrom    AnimeRelation[]       @relation("RelationSource")
+  relationsTo      AnimeRelation[]       @relation("RelationTarget")
+  recommendsFrom   AnimeRecommendation[] @relation("RecommendSource")
+  recommendsTo     AnimeRecommendation[] @relation("RecommendTarget")
+  watchProgress    WatchProgress[]
+  watchHistory     WatchHistory[]
   watchlistEntries WatchlistEntry[]
-  favorites       Favorite[]
-  ratings         Rating[]
-  comments        Comment[]
-  views           AnimeView[]
-  viewStats       AnimeViewStat[]
-  featuredEntries FeaturedAnime[]
-  animeRequests   AnimeRequest[]
-  pollOptions     PollOption[]
-  tierListItems   TierListItem[]
-  postAnime       CommunityPostAnime[]
+  favorites        Favorite[]
+  ratings          Rating[]
+  comments         Comment[]
+  views            AnimeView[]
+  viewStats        AnimeViewStat[]
+  featuredEntries  FeaturedAnime[]
+  animeRequests    AnimeRequest[]
+  pollOptions      PollOption[]
+  tierListItems    TierListItem[]
+  postAnime        CommunityPostAnime[]
 
   @@index([publishStatus, deletedAt])
   @@index([publishStatus, updatedAt(sort: Desc)])
@@ -543,11 +543,11 @@ model AnimeGenre {
 }
 
 model Studio {
-  id        String  @id @default(uuid()) @db.Uuid
-  name      String  @unique
-  slug      String  @unique
-  logoUrl   String?
-  websiteUrl String?
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique
+  slug        String  @unique
+  logoUrl     String?
+  websiteUrl  String?
   description String?
 
   createdAt DateTime @default(now())
@@ -559,9 +559,9 @@ model Studio {
 }
 
 model Producer {
-  id   String @id @default(uuid()) @db.Uuid
-  name String @unique
-  slug String @unique
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique
+  slug        String  @unique
   description String?
 
   createdAt DateTime @default(now())
@@ -599,12 +599,12 @@ model AnimeRelation {
 /// Manually curated recommendations. The recommendation service falls back to
 /// genre/studio/popularity similarity when no manual rows exist.
 model AnimeRecommendation {
-  id                String @id @default(uuid()) @db.Uuid
-  animeId           String @db.Uuid
+  id                 String @id @default(uuid()) @db.Uuid
+  animeId            String @db.Uuid
   recommendedAnimeId String @db.Uuid
-  weight            Int    @default(0)
-  anime             Anime  @relation("RecommendSource", fields: [animeId], references: [id], onDelete: Cascade)
-  recommendedAnime  Anime  @relation("RecommendTarget", fields: [recommendedAnimeId], references: [id], onDelete: Cascade)
+  weight             Int    @default(0)
+  anime              Anime  @relation("RecommendSource", fields: [animeId], references: [id], onDelete: Cascade)
+  recommendedAnime   Anime  @relation("RecommendTarget", fields: [recommendedAnimeId], references: [id], onDelete: Cascade)
 
   @@unique([animeId, recommendedAnimeId])
   @@index([recommendedAnimeId])
@@ -612,11 +612,11 @@ model AnimeRecommendation {
 }
 
 model Season {
-  id      String  @id @default(uuid()) @db.Uuid
-  animeId String  @db.Uuid
-  anime   Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
-  number  Int
-  title   String?
+  id        String  @id @default(uuid()) @db.Uuid
+  animeId   String  @db.Uuid
+  anime     Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  number    Int
+  title     String?
   posterUrl String?
 
   createdAt DateTime @default(now())
@@ -686,6 +686,22 @@ model Episode {
 /// One playable "server" entry for an episode, scoped to a single audio
 /// flavour. The player's Server selector lists these; the SUB/DUB selector
 /// filters them by `kind`.
+/// How far the local worker has got with a SINGLE_MASTER source.
+///
+/// A job is only READY when every step either succeeded or was explicitly
+/// classified as not applicable for this master — a run that produced no 720p
+/// is a FAILED job, not a quiet success.
+enum MediaProcessingState {
+  /// MANUAL_VARIANTS: nothing to process, an admin supplied the files.
+  NOT_APPLICABLE
+  /// A master is registered and the worker has not picked it up yet.
+  PENDING
+  /// Claimed by a worker. Stale claims return to PENDING after a timeout.
+  PROCESSING
+  READY
+  FAILED
+}
+
 model MediaSource {
   id        String  @id @default(uuid()) @db.Uuid
   episodeId String  @db.Uuid
@@ -700,7 +716,7 @@ model MediaSource {
   audioLabel    String @default("Japanese")
 
   /// Only used by MediaProvider.HLS — the .m3u8 master playlist.
-  hlsUrl String?
+  hlsUrl   String?
   /// Only used by MediaProvider.EXTERNAL_EMBED. Rendered in a sandboxed iframe
   /// with the custom controls hidden, because an embed cannot be controlled.
   embedUrl String?
@@ -712,6 +728,23 @@ model MediaSource {
   /// Provider-specific extras (proxy overrides, headers, notes).
   config Json?
 
+  /// SINGLE_MASTER: the one Drive file an admin supplied, from which every
+  /// rendition, audio track and subtitle is derived. Null for MANUAL_VARIANTS,
+  /// where an admin supplies each file themselves.
+  ///
+  /// This field is what turns a MediaSource into a job: set it and the local
+  /// worker will find the source, probe the master and fill in the rest. It is
+  /// never deleted or evicted — it is the source of truth for reprocessing.
+  masterDriveFileId String?
+
+  /// Where that processing has got to. NOT_APPLICABLE is the MANUAL_VARIANTS
+  /// case, so existing rows keep working untouched.
+  processingState MediaProcessingState @default(NOT_APPLICABLE)
+  /// Why the last attempt failed, in words an operator can act on. Cleared on
+  /// the next successful run.
+  processingError String?
+  processedAt     DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -721,6 +754,8 @@ model MediaSource {
 
   @@index([episodeId, isActive, priority])
   @@index([episodeId, kind])
+  /// The worker polls for pending work; this keeps that a single indexed scan.
+  @@index([processingState])
   @@map("media_sources")
 }
 
@@ -738,7 +773,7 @@ model MediaVariant {
   /// a URL and extracts the ID).
   driveFileId String?
   /// DIRECT_FILE / OBJECT_STORAGE: absolute or storage-relative URL.
-  directUrl String?
+  directUrl   String?
 
   mimeType      String? @default("video/mp4")
   fileSizeBytes BigInt?
@@ -772,7 +807,7 @@ model AudioTrack {
   episodeId     String?      @db.Uuid
   episode       Episode?     @relation(fields: [episodeId], references: [id], onDelete: Cascade)
 
-  language String  @db.VarChar(16)
+  language String @db.VarChar(16)
   label    String
 
   /// Where the audio file lives (episode-level tracks only).
@@ -893,7 +928,7 @@ model WatchHistory {
 }
 
 model WatchlistEntry {
-  id      String @db.Uuid @id @default(uuid())
+  id      String @id @default(uuid()) @db.Uuid
   userId  String @db.Uuid
   user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   animeId String @db.Uuid
@@ -969,9 +1004,9 @@ model Comment {
   downvoteCount Int @default(0)
   replyCount    Int @default(0)
 
-  isSpoiler Boolean @default(false)
-  isEdited  Boolean @default(false)
-  isDeleted Boolean @default(false)
+  isSpoiler     Boolean @default(false)
+  isEdited      Boolean @default(false)
+  isDeleted     Boolean @default(false)
   deletedReason String?
 
   createdAt DateTime @default(now())
@@ -1015,7 +1050,7 @@ model Report {
   targetType ReportTargetType
   /// Polymorphic — deliberately not a foreign key so a report survives the
   /// deletion of the content it describes.
-  targetId String @db.Uuid
+  targetId   String           @db.Uuid
 
   kind    ReportKind   @default(OTHER)
   status  ReportStatus @default(PENDING)
@@ -1044,9 +1079,9 @@ model Report {
 // ============================================================================
 
 model AnimeView {
-  id      String @id @default(uuid()) @db.Uuid
-  animeId String @db.Uuid
-  anime   Anime  @relation(fields: [animeId], references: [id], onDelete: Cascade)
+  id      String  @id @default(uuid()) @db.Uuid
+  animeId String  @db.Uuid
+  anime   Anime   @relation(fields: [animeId], references: [id], onDelete: Cascade)
   userId  String? @db.Uuid
   user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -1134,9 +1169,9 @@ model CommunityPost {
   categoryId String            @db.Uuid
   category   CommunityCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
-  title String @db.VarChar(200)
-  slug  String @unique
-  body  String @db.VarChar(20000)
+  title String            @db.VarChar(200)
+  slug  String            @unique
+  body  String            @db.VarChar(20000)
   kind  CommunityPostKind @default(TEXT)
 
   upvoteCount   Int @default(0)
@@ -1144,10 +1179,10 @@ model CommunityPost {
   commentCount  Int @default(0)
   viewCount     Int @default(0)
 
-  isPinned  Boolean @default(false)
-  isLocked  Boolean @default(false)
-  isDeleted Boolean @default(false)
-  isEdited  Boolean @default(false)
+  isPinned      Boolean @default(false)
+  isLocked      Boolean @default(false)
+  isDeleted     Boolean @default(false)
+  isEdited      Boolean @default(false)
   deletedReason String?
 
   createdAt DateTime @default(now())
@@ -1182,8 +1217,8 @@ model CommunityComment {
   upvoteCount Int @default(0)
   replyCount  Int @default(0)
 
-  isEdited  Boolean @default(false)
-  isDeleted Boolean @default(false)
+  isEdited      Boolean @default(false)
+  isDeleted     Boolean @default(false)
   deletedReason String?
 
   createdAt DateTime @default(now())
@@ -1419,15 +1454,15 @@ model SiteSetting {
 /// One configurable advertising slot. Display slots carry AdSense identifiers;
 /// the single VIDEO slot carries the IMA/VAST configuration in `config`.
 model AdPlacement {
-  id   String @id @default(uuid()) @db.Uuid
-  key  String @unique
-  name String
+  id          String  @id @default(uuid()) @db.Uuid
+  key         String  @unique
+  name        String
   description String?
 
-  type     AdType  @default(DISPLAY)
-  adClient String?
-  adSlot   String?
-  format   String? @default("auto")
+  type                AdType  @default(DISPLAY)
+  adClient            String?
+  adSlot              String?
+  format              String? @default("auto")
   fullWidthResponsive Boolean @default(true)
 
   isEnabled Boolean @default(false)
