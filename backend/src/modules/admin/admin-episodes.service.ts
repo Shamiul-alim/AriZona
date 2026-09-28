@@ -169,7 +169,8 @@ export class AdminEpisodesService {
    * so the rebuild is clean and cannot leave orphans.
    */
   private async replaceMedia(episodeId: string, dto: CreateEpisodeDto | UpdateEpisodeDto) {
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(
+      async (tx) => {
       if (dto.mediaSources) {
         await tx.mediaSource.deleteMany({ where: { episodeId } });
 
@@ -290,7 +291,17 @@ export class AdminEpisodesService {
           });
         }
       }
-    });
+      },
+      {
+        // Replacing media is several dependent writes — sources, variants, audio,
+        // subtitles, downloads — and an episode with a full ladder plus tracks
+        // exceeds Prisma's 5s interactive default, especially when the database
+        // is a network hop away. The work is still one atomic unit; it just gets
+        // a budget that matches what it actually does.
+        timeout: 30_000,
+        maxWait: 10_000,
+      },
+    );
   }
 
   private audioRow(episodeId: string, track: EpisodeAudioTrackDto, index: number) {

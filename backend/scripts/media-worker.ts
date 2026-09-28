@@ -60,7 +60,7 @@ process.on('SIGINT', () => {
 
 let accessToken = '';
 
-async function api<T>(pathname: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+async function api<T>(pathname: string, init: { method?: string; body?: unknown } = {}, retrying = false): Promise<T> {
   const res = await fetch(`${API}${pathname}`, {
     method: init.method ?? (init.body ? 'POST' : 'GET'),
     headers: {
@@ -216,6 +216,23 @@ async function evictTo(drive: Drive, folderId: string, needBytes: number): Promi
     throw new Error(`Rendition cache is full: ${MB(used)} MB used, ${MB(needBytes)} MB needed, ceiling ${MB(MAX_CACHE_BYTES)} MB`);
   }
   return used;
+}
+
+/**
+ * A file this worker already uploaded under the same name, if any.
+ *
+ * Rendition names are deterministic, so a run that failed after uploading but
+ * before registering — an expired token at the final step, say — can adopt its
+ * own earlier output instead of spending another forty minutes rebuilding it
+ * and leaving the first copy orphaned in Drive.
+ */
+async function existingUpload(drive: Drive, folderId: string, name: string): Promise<string | null> {
+  const found = await drive.files.list({
+    q: `name='${name.replace(/'/g, "\'")}' and '${folderId}' in parents and trashed=false`,
+    fields: 'files(id,size)',
+  });
+  const file = found.data.files?.[0];
+  return file?.id && Number(file.size ?? 0) > 0 ? file.id : null;
 }
 
 async function uploadRendition(drive: Drive, folderId: string, filePath: string, name: string): Promise<string> {
@@ -392,6 +409,14 @@ async function processJob(job: Job): Promise<void> {
     }
     if (stopping) throw new Error('Stopped before this rendition was built');
 
+    const renditionName = `${base}-${rung.height}p.mp4`;
+    const adopted = await existingUpload(drive, folder, renditionName);
+    if (adopted) {
+      step(`${rung.height}p`, 'adopted an earlier upload');
+      variants.push({ quality: rung.quality, driveFileIdOrUrl: adopted, isDefault: false });
+      continue;
+    }
+
     const out = path.join(WORK_DIR, `${base}-${rung.height}.mp4`);
     await encodeVideo(masterPath, rung.height, rung.kbps, out);
     const id = await uploadRendition(drive, folder, out, `${base}-${rung.height}p.mp4`);
@@ -417,6 +442,14 @@ async function processJob(job: Job): Promise<void> {
         continue;
       }
       if (stopping) throw new Error('Stopped before this audio track was built');
+
+      const audioName = `${base}-${key}.m4a`;
+      const adoptedAudio = await existingUpload(drive, folder, audioName);
+      if (adoptedAudio) {
+        step(`audio ${position + 1}`, `${stream.label} (adopted)`);
+        audioTracks.push({ language: key, label: stream.label, driveFileIdOrUrl: adoptedAudio, isDefault: stream.isDefault, sortOrder: position });
+        continue;
+      }
 
       const out = path.join(WORK_DIR, `${base}-audio-${position}.m4a`);
       await encodeAudio(masterPath, stream.index, out);
@@ -450,6 +483,14 @@ async function processJob(job: Job): Promise<void> {
     }
     if (stopping) throw new Error('Stopped before this subtitle was built');
 
+    const subName = `${base}-${key}.vtt`;
+    const adoptedSub = await existingUpload(drive, folder, subName);
+    if (adoptedSub) {
+      step(`subtitle ${position + 1}`, `${stream.label} (adopted)`);
+      subtitleTracks.push({ language: key, label: stream.label, format: 'VTT', driveFileIdOrUrl: adoptedSub, isDefault: stream.isDefault, isForced: stream.isForced });
+      continue;
+    }
+
     const out = path.join(WORK_DIR, `${base}-sub-${position}.vtt`);
     await encodeSubtitle(masterPath, stream.index, out);
     const id = await uploadRendition(drive, folder, out, `${base}-${key}.vtt`);
@@ -476,15 +517,15 @@ async function processJob(job: Job): Promise<void> {
           isDefault: true,
           masterDriveFileIdOrUrl: job.masterDriveFileId,
           variants,
-          audioTracks,
-          subtitleTracks,
         },
       ],
+      // Separate audio files and WebVTT subtitles are episode-level tracks.
+      // The arrays nested inside a source describe HLS rendition groups, which
+      // is a different thing, and sending them there persists nothing.
+      audioTracks,
+      subtitleTracks,
     },
   });
-  step('register', `${variants.length} quality, ${audioTracks.length} audio, ${subtitleTracks.length} subtitle`);
-
-  // The PUT re-queued the source by design; this is what says it is done.
   const sources = await api<Array<{ id: string; isSingleMaster: boolean }>>(`/admin/episodes/${job.episode.id}/media-status`);
   const target = sources.find((s) => s.isSingleMaster) ?? sources[0];
   await api(`/admin/media/jobs/${target.id}/complete`, { body: { ready: true } });

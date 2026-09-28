@@ -121,6 +121,20 @@ export class AdminMediaJobsService {
 
   /** Status for the admin UI: what exists for this episode right now. */
   async statusForEpisode(episodeId: string) {
+    // Audio and subtitle files built from a master hang off the episode, not
+    // the source — the arrays nested in a source describe HLS rendition groups.
+    const [episodeAudio, episodeSubtitles] = await Promise.all([
+      this.prisma.audioTrack.findMany({
+        where: { episodeId },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { language: true, label: true, isDefault: true },
+      }),
+      this.prisma.subtitleTrack.findMany({
+        where: { episodeId },
+        select: { language: true, label: true, isDefault: true },
+      }),
+    ]);
+
     const sources = await this.prisma.mediaSource.findMany({
       where: { episodeId },
       orderBy: { priority: 'asc' },
@@ -146,8 +160,8 @@ export class AdminMediaJobsService {
       processingError: s.processingError,
       processedAt: s.processedAt,
       qualities: s.variants.filter((v) => v.isActive).map((v) => v.quality),
-      audio: s.audioTracks.map((a) => ({ language: a.language, label: a.label, isDefault: a.isDefault })),
-      subtitles: s.subtitleTracks.map((t) => ({ language: t.language, label: t.label, isDefault: t.isDefault })),
+      audio: s.audioTracks.length > 0 ? s.audioTracks.map((a) => ({ language: a.language, label: a.label, isDefault: a.isDefault })) : episodeAudio,
+      subtitles: s.subtitleTracks.length > 0 ? s.subtitleTracks.map((t) => ({ language: t.language, label: t.label, isDefault: t.isDefault })) : episodeSubtitles,
     }));
   }
 
