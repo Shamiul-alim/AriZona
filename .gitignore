@@ -68,6 +68,13 @@ cookies*.json
 *.token
 *.tokens
 
+# Source media. Masters are large and belong in Drive, never in the repo.
+*.mkv
+*.mp4
+*.m4a
+*.vtt
+!frontend/public/**/*.vtt
+
 # Generated production credentials — never commit
 *.local.txt
 

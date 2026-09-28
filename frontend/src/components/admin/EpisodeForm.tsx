@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { qs } from '@/lib/api';
 import { authFetch } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
+import { MediaProcessingStatus } from './MediaProcessingStatus';
 import { AdminHeader, Banner, Button, Card, Label, adminInput, adminSelect, adminTextarea } from './ui';
 import { ImageUploadField } from './ImageUploadField';
 
@@ -421,6 +422,8 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-5">
+          <MediaProcessingStatus episodeId={episodeId} />
+
           <Card title="Episode">
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_7rem]">
