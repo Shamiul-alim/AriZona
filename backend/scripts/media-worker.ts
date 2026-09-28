@@ -128,12 +128,18 @@ function capture(bin: string, args: string[]): Promise<string> {
 async function assertModernFfmpeg(): Promise<void> {
   const version = await capture(FFMPEG, ['-version']);
   const first = version.split('\n')[0];
-  // The 2013 build on this machine cannot decode 10-bit HEVC or write WebVTT
-  // properly, and fails in ways that look like a corrupt source file.
-  const year = Number(/(\d{4})/.exec(first.replace(/ffmpeg version \S+/, ''))?.[1] ?? 0);
-  if (/N-5\d{4}/.test(first) || (year && year < 2020)) {
+  // The build date, not the copyright range: every build prints "(c) 2000-2026",
+  // which says nothing about how old it is. Modern builds carry a -YYYYMMDD
+  // suffix; older ones only a "built on <date>" line. The 2013 build on this
+  // machine cannot decode 10-bit HEVC or write WebVTT, and fails in ways that
+  // look like a corrupt source file.
+  const suffix = /-(\d{4})\d{4}\b/.exec(first);
+  const builtOn = /built on \w+\s+\d+\s+(\d{4})/.exec(version);
+  const buildYear = Number(suffix?.[1] ?? builtOn?.[1] ?? 0);
+  if (buildYear && buildYear < 2020) {
     throw new Error(
-      `The ffmpeg on PATH is too old for this pipeline (${first.trim()}).\n` +
+      `The ffmpeg on PATH is too old for this pipeline (${first.trim()}).
+` +
         `Point FFMPEG and FFPROBE at a current build, e.g. FFMPEG=/path/to/ffmpeg.exe`,
     );
   }
@@ -355,7 +361,7 @@ function describe(job: Job): string {
 
 // --- one job ----------------------------------------------------------------
 
-async function process(job: Job): Promise<void> {
+async function processJob(job: Job): Promise<void> {
   log(`\n${describe(job)}`);
   fs.mkdirSync(WORK_DIR, { recursive: true });
 
@@ -498,7 +504,7 @@ async function tick(): Promise<number> {
     if (!claimed) continue; // another worker took it
 
     try {
-      await process({ ...job, ...claimed });
+      await processJob({ ...job, ...claimed });
       done++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

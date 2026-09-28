@@ -366,9 +366,13 @@ export class AdminEpisodesService {
       source.provider === MediaProvider.GOOGLE_DRIVE ||
       source.provider === MediaProvider.DIRECT_FILE ||
       source.provider === MediaProvider.OBJECT_STORAGE;
-    if (needsVariants && !source.variants?.length) {
+    // A master is the alternative to supplying qualities by hand: the worker
+    // derives them from it. Requiring both would make SINGLE_MASTER impossible
+    // to save, which is exactly what it did before.
+    if (needsVariants && !source.variants?.length && !source.masterDriveFileIdOrUrl) {
       throw new BadRequestException(
-        `Source "${source.label}" needs at least one quality. Each quality is a separate file for this provider.`,
+        `Source "${source.label}" needs either a master file or at least one quality. ` +
+          `With a master the worker builds each quality for you; without one, each quality is a separate file you supply.`,
       );
     }
   }
