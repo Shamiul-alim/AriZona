@@ -2,7 +2,12 @@
 # Is the AniZora media worker running, and what is it doing?
 #
 # Answers the three questions that actually come up: is it on, can it reach
-# AniZora, and is it working on something right now. Prints no credentials.
+# AniZora, and is it working on something right now.
+#
+# The connection and credential checks run inside the container, so they report
+# the worker's own view rather than this shell's — those differ, and the
+# worker's is the one that matters. It also means this script never reads or
+# handles the token.
 . "$(dirname "$0")/common.sh"
 
 echo
@@ -45,39 +50,9 @@ if [ -n "$STARTED" ]; then
   fi
 fi
 
-API="$(env_value API_URL)"
-TOKEN="$(env_value MEDIA_WORKER_TOKEN)"
-if [ -z "$API" ]; then
-  printf 'Backend:        '; red "No configuration found"
-  echo; exit 1
-fi
-
-if curl -fsS --max-time 30 "$API/health" >/dev/null 2>&1; then
-  printf 'Backend:        '; green "Reachable"
-else
-  printf 'Backend:        '; red "Unreachable"
-  grey "                The worker keeps retrying; jobs are not lost."
-  echo; exit 1
-fi
-
-# The token is used, never displayed.
-CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
-  -H "authorization: Bearer $TOKEN" "$API/media-worker/jobs?limit=1" || echo 000)"
-case "$CODE" in
-  2*) printf 'Authentication: '; green "OK" ;;
-  401)
-    printf 'Authentication: '; red "Rejected"
-    grey "                This token does not match the AniZora backend,"
-    grey "                or the backend has no MEDIA_WORKER_TOKEN set."
-    echo; exit 1 ;;
-  *)
-    printf 'Authentication: '; amber "Could not check ($CODE)"
-    echo; exit 1 ;;
-esac
-
-# Read from the worker's own log rather than the API, so this still answers
-# usefully when the machine is fine but the network is not.
-LOG="$(docker logs --tail 60 "$CONTAINER" 2>&1 || true)"
+# Read from the worker's own log, so this still answers usefully when the
+# machine is fine but the network is not.
+LOG="$(docker logs --tail 80 "$CONTAINER" 2>&1 || true)"
 
 LAST_STAMP="$(printf '%s\n' "$LOG" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' | tail -1 || true)"
 if [ -n "$LAST_STAMP" ]; then
@@ -89,23 +64,33 @@ if [ -n "$LAST_STAMP" ]; then
   fi
 fi
 
-# A job prints its title, then indented steps. The newest title still followed
-# by steps is what is running now.
+# A job prints its title, then indented steps. "state" is the last step of a
+# job, so a title followed by one means that job is finished.
 CURRENT=""; CURRENT_STEP=""
 while IFS= read -r line; do
-  if printf '%s' "$line" | grep -qE '^  [a-z0-9]+\.+ '; then
-    name="$(printf '%s' "$line" | sed -E 's/^  ([a-z0-9]+)\.+ +(.*)$/\1/')"
-    rest="$(printf '%s' "$line" | sed -E 's/^  ([a-z0-9]+)\.+ +(.*)$/\2/')"
+  if printf '%s' "$line" | grep -qE '^  [A-Za-z0-9]+\.+ '; then
+    name="$(printf '%s' "$line" | sed -E 's/^  ([A-Za-z0-9]+)\.+ +(.*)$/\1/')"
+    rest="$(printf '%s' "$line" | sed -E 's/^  ([A-Za-z0-9]+)\.+ +(.*)$/\2/')"
     if [ "$name" = "state" ]; then CURRENT=""; CURRENT_STEP=""
-    else CURRENT_STEP="$name - $rest"; fi
-  elif [ -n "$line" ] && ! printf '%s' "$line" | grep -qE '^[0-9]{4}-'; then
+    else CURRENT_STEP="$rest ($name)"; fi
+  elif [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ] && ! printf '%s' "$line" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'; then
     CURRENT="$(printf '%s' "$line" | sed -e 's/^ *//' -e 's/ *$//')"
     CURRENT_STEP=""
   fi
 done <<< "$LOG"
 
+# The worker's own preflight, run inside the container. Reusing it means what
+# this reports and what the worker needs cannot drift apart.
+echo
+echo "Checks (from inside the worker):"
+CHECK_OK=0
+# Run once and keep both the output and the verdict: a second run would repeat
+# the Drive calls for nothing.
+CHECK_OUT="$(docker exec "$CONTAINER" node dist/worker/media-worker.js --check 2>&1)" || CHECK_OK=1
+printf '%s\n' "$CHECK_OUT" | grep -E '\bOK\b|FAIL' || true
+
+echo
 if [ -n "$CURRENT" ]; then
-  echo
   echo "Current job:"
   echo "  $CURRENT"
   [ -n "$CURRENT_STEP" ] && grey "  $CURRENT_STEP"
@@ -116,3 +101,4 @@ fi
 echo
 grey "Live output:  ./logs-worker.sh"
 echo
+exit $CHECK_OK

@@ -6,7 +6,10 @@
     Answers the three questions that actually come up: is it on, can it reach
     AniZora, and is it working on something right now.
 
-    Prints no credentials.
+    The connection and credential checks run inside the container, so they
+    report the worker's own view rather than this desktop's — those differ, and
+    the worker's is the one that matters. It also means this script never reads
+    or handles the token.
 #>
 [CmdletBinding()]
 param()
@@ -14,17 +17,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$Root = Split-Path -Parent $PSScriptRoot
-$EnvFile = Join-Path $Root '.env.worker'
-
-function Get-EnvValue {
-    param([string]$Name)
-    if (-not (Test-Path $EnvFile)) { return $null }
-    foreach ($line in Get-Content $EnvFile) {
-        if ($line -match "^\s*$Name\s*=\s*(.*)$") { return $Matches[1].Trim() }
-    }
-    return $null
-}
+$Container = 'anizora-media-worker'
 
 Write-Host ''
 Write-Host 'AniZora Media Worker' -ForegroundColor White
@@ -32,8 +25,6 @@ Write-Host '---------------------' -ForegroundColor DarkGray
 
 # --- Container ---------------------------------------------------------------
 
-$state = $null
-$since = $null
 docker info 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'Container:      ' -NoNewline; Write-Host 'Docker is not running' -ForegroundColor Red
@@ -43,7 +34,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-$state = (docker inspect --format '{{.State.Status}}' anizora-media-worker 2>$null)
+$state = (docker inspect --format '{{.State.Status}}' $Container 2>$null)
 if (-not $state) {
     Write-Host 'Container:      ' -NoNewline; Write-Host 'Not installed' -ForegroundColor Red
     Write-Host ''
@@ -52,18 +43,7 @@ if (-not $state) {
     exit 1
 }
 
-if ($state -eq 'running') {
-    Write-Host 'Container:      ' -NoNewline; Write-Host 'Running' -ForegroundColor Green
-    $startedAt = (docker inspect --format '{{.State.StartedAt}}' anizora-media-worker 2>$null)
-    if ($startedAt) {
-        $up = (Get-Date).ToUniversalTime() - ([DateTime]::Parse($startedAt)).ToUniversalTime()
-        $since = if ($up.TotalDays -ge 1) { '{0:N0} days' -f $up.TotalDays }
-        elseif ($up.TotalHours -ge 1) { '{0:N0} hours' -f $up.TotalHours }
-        else { '{0:N0} min' -f $up.TotalMinutes }
-        Write-Host "Uptime:         $since"
-    }
-}
-else {
+if ($state -ne 'running') {
     Write-Host 'Container:      ' -NoNewline; Write-Host $state -ForegroundColor Yellow
     Write-Host ''
     Write-Host 'Start it with .\start-worker.ps1' -ForegroundColor DarkGray
@@ -71,61 +51,30 @@ else {
     exit 1
 }
 
-# --- Backend and authentication ----------------------------------------------
+Write-Host 'Container:      ' -NoNewline; Write-Host 'Running' -ForegroundColor Green
 
-$api = Get-EnvValue 'API_URL'
-$token = Get-EnvValue 'MEDIA_WORKER_TOKEN'
-
-if (-not $api) {
-    Write-Host 'Backend:        ' -NoNewline; Write-Host 'No configuration found' -ForegroundColor Red
-    Write-Host ''
-    exit 1
-}
-
-try {
-    $health = Invoke-RestMethod -Uri "$api/health" -TimeoutSec 30
-    $dbNote = if ($health.database -eq 'up') { '' } else { " (database: $($health.database))" }
-    Write-Host 'Backend:        ' -NoNewline; Write-Host "Reachable$dbNote" -ForegroundColor Green
-}
-catch {
-    Write-Host 'Backend:        ' -NoNewline; Write-Host 'Unreachable' -ForegroundColor Red
-    Write-Host '                The worker keeps retrying; jobs are not lost.' -ForegroundColor DarkGray
-    Write-Host ''
-    exit 1
-}
-
-# The token is used, never displayed.
-try {
-    $null = Invoke-RestMethod -Uri "$api/media-worker/jobs?limit=1" -TimeoutSec 30 `
-        -Headers @{ authorization = "Bearer $token" }
-    Write-Host 'Authentication: ' -NoNewline; Write-Host 'OK' -ForegroundColor Green
-}
-catch {
-    $code = $null
-    if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
-    if ($code -eq 401) {
-        Write-Host 'Authentication: ' -NoNewline; Write-Host 'Rejected' -ForegroundColor Red
-        Write-Host '                This token does not match the AniZora backend,' -ForegroundColor DarkGray
-        Write-Host '                or the backend has no MEDIA_WORKER_TOKEN set.' -ForegroundColor DarkGray
-    }
-    else {
-        Write-Host 'Authentication: ' -NoNewline; Write-Host "Could not check ($code)" -ForegroundColor Yellow
-    }
-    Write-Host ''
-    exit 1
+$startedAt = (docker inspect --format '{{.State.StartedAt}}' $Container 2>$null)
+if ($startedAt) {
+    $up = (Get-Date).ToUniversalTime() - ([DateTime]::Parse($startedAt)).ToUniversalTime()
+    $since = if ($up.TotalDays -ge 1) { '{0:N0} days' -f $up.TotalDays }
+    elseif ($up.TotalHours -ge 1) { '{0:N0} hours' -f $up.TotalHours }
+    else { '{0:N0} min' -f $up.TotalMinutes }
+    Write-Host "Uptime:         $since"
 }
 
 # --- What it is doing --------------------------------------------------------
-# Read from the worker's own log rather than the API, so this still answers
-# usefully when the machine is fine but the network is not.
+# Read from the worker's own log, so this still answers usefully when the
+# machine is fine but the network is not.
 
-$log = docker logs --tail 60 anizora-media-worker 2>&1
+$log = docker logs --tail 80 $Container 2>&1
 
-$lastPoll = $log | Select-String -Pattern '^\S+Z ' | Select-Object -Last 1
-if ($lastPoll) {
-    $stamp = ($lastPoll.ToString() -split ' ')[0]
+$lastStamp = $null
+foreach ($line in $log) {
+    if ($line.ToString() -match '^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)') { $lastStamp = $Matches[1] }
+}
+if ($lastStamp) {
     try {
-        $seen = (Get-Date).ToUniversalTime() - ([DateTime]::Parse($stamp)).ToUniversalTime()
+        $seen = (Get-Date).ToUniversalTime() - ([DateTime]::Parse($lastStamp)).ToUniversalTime()
         $agoText = if ($seen.TotalMinutes -ge 60) { '{0:N0} hr ago' -f $seen.TotalHours }
         elseif ($seen.TotalSeconds -ge 60) { '{0:N0} min ago' -f $seen.TotalMinutes }
         else { '{0:N0} sec ago' -f $seen.TotalSeconds }
@@ -134,24 +83,40 @@ if ($lastPoll) {
     catch { }
 }
 
-# A job prints its title, then indented steps. The newest title with a step
-# after it is what is running now.
+# A job prints its title, then indented steps. "state" is the last step of a
+# job, so a title followed by one means that job is finished.
 $current = $null
 $currentStep = $null
 foreach ($line in $log) {
     $text = $line.ToString()
-    if ($text -match '^\s{2}(\S+?)\.+\s+(.*)$') {
-        $currentStep = "$($Matches[1]) - $($Matches[2])"
+    if ($text -match '^\s\s(\S+?)\.+\s+(.*)$') {
         if ($Matches[1] -eq 'state') { $current = $null; $currentStep = $null }
+        else { $currentStep = "$($Matches[2]) ($($Matches[1]))" }
     }
-    elseif ($text -and $text -notmatch '^\S+Z ' -and $text.Trim()) {
+    elseif ($text.Trim() -and $text -notmatch '^\d{4}-\d{2}-\d{2}T') {
         $current = $text.Trim()
         $currentStep = $null
     }
 }
 
+# --- Connection and credentials ----------------------------------------------
+# The worker's own preflight, run inside the container. Reusing it means what
+# this reports and what the worker needs cannot drift apart.
+
+Write-Host ''
+Write-Host 'Checks (from inside the worker):' -ForegroundColor White
+$check = docker exec $Container node dist/worker/media-worker.js --check 2>&1
+$checkOk = ($LASTEXITCODE -eq 0)
+foreach ($line in $check) {
+    $text = $line.ToString()
+    if ($text -match 'FAIL') { Write-Host $text -ForegroundColor Red }
+    elseif ($text -match '\bOK\b') { Write-Host $text -ForegroundColor Green }
+}
+
+# --- Current job -------------------------------------------------------------
+
+Write-Host ''
 if ($current) {
-    Write-Host ''
     Write-Host 'Current job:' -ForegroundColor White
     Write-Host "  $current"
     if ($currentStep) { Write-Host "  $currentStep" -ForegroundColor DarkGray }
@@ -163,3 +128,5 @@ else {
 Write-Host ''
 Write-Host 'Live output:  .\logs-worker.ps1' -ForegroundColor DarkGray
 Write-Host ''
+
+if (-not $checkOk) { exit 1 }
