@@ -101,7 +101,7 @@ yourself. Use it only if you have a master and no qualities.
 | Variable | Purpose |
 | --- | --- |
 | `MEDIA_WORKER_TOKEN` | Shared secret the worker presents. **Unset closes the worker endpoints** rather than leaving them open. |
-| `GOOGLE_DRIVE_CLIENT_ID` | OAuth client used to store masters. |
+| `GOOGLE_DRIVE_CLIENT_ID` | OAuth client used to store uploaded video. |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | — |
 | `GOOGLE_DRIVE_REFRESH_TOKEN` | — |
 
@@ -318,8 +318,8 @@ token, not the refresh token, not the service-account key.
 
 ## Backup and recovery
 
-Masters are the only irreplaceable artefact — everything else can be rebuilt
-from them. Back up the `AniZora masters` folder.
+Your video files are the only irreplaceable artefact — the tracks are rebuilt
+from them in minutes. Back up the `AniZora masters` Drive folder.
 
 To rebuild an episode: open it in the admin panel and save it again. That
 re-queues the job; the worker adopts what already exists and regenerates only
@@ -404,7 +404,7 @@ shell history.
 | --- | --- |
 | `API_URL` | `https://arizona-3.onrender.com/api` |
 | `MEDIA_WORKER_TOKEN` | Must match the Render backend exactly |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | Reading masters |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | Optional — narrows reading to read-only |
 | `GOOGLE_DRIVE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN` | Writing generated media |
 
 Base64 is preferred over a file path so no machine-specific path is ever baked
@@ -462,7 +462,7 @@ A worker machine that is switched off is a normal state, not a fault:
 
 | | |
 | --- | --- |
-| Admin uploads a master | Works. |
+| Admin uploads the qualities | Works, and viewers can watch them immediately. |
 | Episode state | `PENDING`. |
 | Admin panel | *Worker offline — processing begins automatically when a worker comes online.* |
 | When the machine starts | Docker starts → worker starts → queue drains. |
@@ -488,8 +488,8 @@ identical container runs there with no code change.
 
 ## H. Backup and recovery
 
-Masters are the only irreplaceable artefact; everything else is rebuilt from
-them. Back up the `AniZora masters` Drive folder.
+Your video files are the only irreplaceable artefact — the tracks are rebuilt
+from them in minutes. Back up the `AniZora masters` Drive folder.
 
 To rebuild an episode, open it in the admin panel and save it again. That
 re-queues the job, and the worker regenerates only what is missing.
