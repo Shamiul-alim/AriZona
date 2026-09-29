@@ -177,7 +177,7 @@ export class AdminEpisodesService {
         for (const [index, source] of dto.mediaSources.entries()) {
           this.assertSourcePayload(source);
 
-          // A master turns this source into a job for the local worker. The
+          // A master turns this source into a job for the media worker. The
           // state is set here rather than inferred later, so an admin who
           // edits the media of a SINGLE_MASTER episode re-queues it instead of
           // silently leaving stale renditions behind. The worker marks it READY

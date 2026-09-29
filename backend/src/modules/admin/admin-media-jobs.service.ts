@@ -1,25 +1,33 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { MediaProcessingState } from '@prisma/client';
+import { MediaProcessingState, VideoQuality } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 
+/** What a worker reports having produced. Mirrors RegisterMediaDto. */
+export interface RegisterProducedMedia {
+  variants: Array<{ quality: VideoQuality; driveFileId: string }>;
+  audioTracks?: Array<{ language: string; label: string; driveFileId: string; isDefault?: boolean; sortOrder?: number }>;
+  subtitleTracks?: Array<{ language: string; label: string; driveFileId: string; isDefault?: boolean; isForced?: boolean }>;
+}
+
 /**
- * The queue the local worker pulls from.
+ * The queue the media worker pulls from.
  *
  * There is no separate job table: a MediaSource with a `masterDriveFileId` is
  * the job, and `processingState` is its progress. That keeps one row as the
  * source of truth for both "what should play" and "what still needs building",
  * so the two can never disagree.
  *
- * Transcoding runs on the operator's own machine, so the server's part is only
- * to hand out work, accept the result and record why an attempt failed.
+ * Transcoding runs in a separate worker service, so the API's part is only to
+ * hand out work, accept the result and record why an attempt failed. Nothing
+ * here depends on where that worker runs.
  */
 @Injectable()
 export class AdminMediaJobsService {
   private readonly logger = new Logger(AdminMediaJobsService.name);
 
   /**
-   * A claim older than this is assumed dead — the worker was killed, the laptop
-   * slept, the network dropped — and the job becomes available again. Long
+   * A claim older than this is assumed dead — the container was stopped, the
+   * host rebooted, the network dropped — and the job becomes available again. Long
    * enough that a genuinely slow encode is never stolen mid-run.
    */
   private static readonly STALE_CLAIM_MS = 90 * 60 * 1000;
@@ -34,6 +42,10 @@ export class AdminMediaJobsService {
       where: {
         masterDriveFileId: { not: null },
         processingState: { in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED] },
+        // An archived episode is not worth an hour of CPU. FAILED jobs are
+        // retried on every poll, so without this an archived failure would
+        // loop forever on content nobody can watch.
+        episode: { deletedAt: null },
       },
       orderBy: [{ episode: { animeId: 'asc' } }, { episode: { number: 'asc' } }],
       take: Math.min(limit, 50),
@@ -117,6 +129,101 @@ export class AdminMediaJobsService {
     });
     this.logger.log(`Media job ${id} -> ${updated.processingState}`);
     return updated;
+  }
+
+  /**
+   * Heartbeat plus the step being worked on.
+   *
+   * The step is stored where the failure reason goes, prefixed so the admin
+   * panel can tell "this is happening" from "this went wrong", and the write
+   * doubles as the liveness signal that keeps a long encode from being treated
+   * as an abandoned claim.
+   */
+  async reportProgress(id: string, step: string, detail?: string) {
+    const updated = await this.prisma.mediaSource.updateMany({
+      where: { id, processingState: MediaProcessingState.PROCESSING },
+      data: {
+        processingError: `STEP:${step}${detail ? ` — ${detail}` : ''}`.slice(0, 2000),
+        updatedAt: new Date(),
+      },
+    });
+    if (updated.count === 0) throw new NotFoundException('That job is not currently being processed');
+    return { id, step, detail: detail ?? null };
+  }
+
+  /**
+   * Registers what one job produced.
+   *
+   * Scoped on purpose: it writes the renditions and tracks for this source and
+   * nothing else. The worker never calls the episode endpoints, which can
+   * replace media wholesale and belong to an admin.
+   *
+   * Idempotent by (source, quality) and (episode, language): re-running a job
+   * updates rows rather than adding a second copy.
+   */
+  async registerProducedMedia(id: string, dto: RegisterProducedMedia) {
+    const source = await this.prisma.mediaSource.findUnique({
+      where: { id },
+      select: { id: true, episodeId: true, masterDriveFileId: true },
+    });
+    if (!source) throw new NotFoundException('Media source not found');
+    if (!source.masterDriveFileId) throw new BadRequestException('That source has no master to process');
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        for (const [index, variant] of dto.variants.entries()) {
+          const existing = await tx.mediaVariant.findFirst({
+            where: { mediaSourceId: id, quality: variant.quality },
+            select: { id: true },
+          });
+          const data = {
+            mediaSourceId: id,
+            quality: variant.quality,
+            driveFileId: variant.driveFileId,
+            isDefault: index === 0,
+            isActive: true,
+          };
+          if (existing) await tx.mediaVariant.update({ where: { id: existing.id }, data });
+          else await tx.mediaVariant.create({ data });
+        }
+
+        // Audio and subtitles hang off the episode: they are separate playable
+        // files, not HLS rendition groups.
+        if (dto.audioTracks?.length) {
+          await tx.audioTrack.deleteMany({ where: { episodeId: source.episodeId } });
+          await tx.audioTrack.createMany({
+            data: dto.audioTracks.map((track, order) => ({
+              episodeId: source.episodeId,
+              language: track.language,
+              label: track.label,
+              driveFileId: track.driveFileId,
+              isDefault: track.isDefault ?? order === 0,
+              sortOrder: track.sortOrder ?? order,
+            })),
+          });
+        }
+
+        if (dto.subtitleTracks?.length) {
+          await tx.subtitleTrack.deleteMany({ where: { episodeId: source.episodeId } });
+          await tx.subtitleTrack.createMany({
+            data: dto.subtitleTracks.map((track) => ({
+              episodeId: source.episodeId,
+              language: track.language,
+              label: track.label,
+              driveFileId: track.driveFileId,
+              isDefault: track.isDefault ?? false,
+              isForced: track.isForced ?? false,
+            })),
+          });
+        }
+      },
+      { timeout: 30_000, maxWait: 10_000 },
+    );
+
+    this.logger.log(
+      `Job ${id}: registered ${dto.variants.length} rendition(s), ${dto.audioTracks?.length ?? 0} audio, ${dto.subtitleTracks?.length ?? 0} subtitle`,
+    );
+    return { id, variants: dto.variants.length };
   }
 
   /** Status for the admin UI: what exists for this episode right now. */

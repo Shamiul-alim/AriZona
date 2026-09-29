@@ -29,8 +29,8 @@ const TONE: Record<State, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = {
 const EXPLAIN: Record<State, string> = {
   READY: 'Everything the master implies has been built.',
   PROCESSING: 'A worker has claimed this and is building it now.',
-  PENDING: 'Waiting for a worker. Run npm run media:worker on the machine with FFmpeg.',
-  FAILED: 'The last attempt stopped. The cause is below; fixing it and re-running the worker retries.',
+  PENDING: 'Queued. The media worker picks this up on its next poll — nothing to run by hand.',
+  FAILED: 'The last attempt stopped. The cause is below; the worker retries on its next poll.',
   NOT_APPLICABLE: 'Manual variants — you supply each file, so there is nothing to process.',
 };
 

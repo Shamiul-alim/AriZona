@@ -24,8 +24,8 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "ts-node --transpile-only prisma/seed.ts",
     "db:studio": "prisma studio",
-    "media:worker": "ts-node --transpile-only scripts/media-worker.ts",
-    "media:worker:once": "ts-node --transpile-only scripts/media-worker.ts --once"
+    "worker:start": "node dist/worker/media-worker.js",
+    "worker:dev": "ts-node --transpile-only src/worker/media-worker.ts"
   },
   "prisma": {
     "seed": "ts-node --transpile-only prisma/seed.ts"

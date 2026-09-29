@@ -7,9 +7,8 @@ before moving on.
 
 ## Part 1 — Get into the admin panel
 
-1. Make sure the site is running. In PowerShell:
-   ```powershell
-   cd E:\tofayel_project
+1. Make sure the site is running. From the project directory:
+   ```bash
    docker compose ps
    ```
    All five containers should say **healthy**. If not: `docker compose up -d`.
@@ -114,18 +113,26 @@ keeps your position — so each needs its own file.
 
 Two or three qualities is plenty. Every file costs Drive space and upload time.
 
-### Tool: ffmpeg (already installed on this PC) or HandBrake
+> **You usually do not need any of this.** Set the episode's media mode to
+> **SINGLE_MASTER**, upload one master file, and the media worker builds every
+> quality, audio track and subtitle for you. See
+> [MEDIA_WORKER_DEPLOYMENT.md](MEDIA_WORKER_DEPLOYMENT.md). The manual route
+> below is for preparing files by hand when you want to control the encode
+> yourself.
+
+### Tool: ffmpeg or HandBrake
 
 **Option A — HandBrake (no typing):** https://handbrake.fr
 Preset **Web → "Creator 1080p60"** (and 720p, 480p). Tick **Web Optimized**
 (this is important — it makes seeking fast). Choose the audio track in the Audio
 tab. Output format MP4.
 
-**Option B — ffmpeg (commands below).** Open PowerShell in the folder with your
-files. Replace `input.mkv` with your file name.
+**Option B — ffmpeg (commands below).** Open a terminal in the folder with your
+files. Replace `input.mkv` with your file name. The commands are the same on
+Windows, macOS and Linux.
 
 #### Step 1 — see what is inside the file
-```powershell
+```bash
 ffprobe -hide_banner input.mkv
 ```
 Look for lines like:
@@ -137,7 +144,7 @@ Stream #0:3(eng): Subtitle: subrip    <- text subtitles  = subtitle track 0
 (Count audio tracks from 0 in order; ignore the video line.)
 
 #### Step 2 — SUB versions (Japanese audio)
-```powershell
+```bash
 ffmpeg -i input.mkv -map 0:v:0 -map 0:a:0 -c:v libx264 -crf 21 -preset slow -vf scale=-2:1080 -pix_fmt yuv420p -c:a aac -strict -2 -b:a 192k -movflags +faststart ep01-sub-1080p.mp4
 ffmpeg -i input.mkv -map 0:v:0 -map 0:a:0 -c:v libx264 -crf 22 -preset slow -vf scale=-2:720  -pix_fmt yuv420p -c:a aac -strict -2 -b:a 160k -movflags +faststart ep01-sub-720p.mp4
 ffmpeg -i input.mkv -map 0:v:0 -map 0:a:0 -c:v libx264 -crf 23 -preset slow -vf scale=-2:480  -pix_fmt yuv420p -c:a aac -strict -2 -b:a 128k -movflags +faststart ep01-sub-480p.mp4
@@ -145,19 +152,19 @@ ffmpeg -i input.mkv -map 0:v:0 -map 0:a:0 -c:v libx264 -crf 23 -preset slow -vf 
 
 #### Step 3 — DUB versions, when the dub is a second track in the same file
 Same commands, but `-map 0:a:1` (the English track) and `dub` in the name:
-```powershell
+```bash
 ffmpeg -i input.mkv -map 0:v:0 -map 0:a:1 -c:v libx264 -crf 22 -preset slow -vf scale=-2:720 -pix_fmt yuv420p -c:a aac -strict -2 -b:a 160k -movflags +faststart ep01-dub-720p.mp4
 ```
 
 #### Step 4 — DUB versions, when the dub is a separate audio file
 Reuse the already-encoded video (fast, no quality loss) and swap the audio:
-```powershell
+```bash
 ffmpeg -i ep01-sub-720p.mp4 -i ep01-english.wav -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -strict -2 -b:a 160k -shortest -movflags +faststart ep01-dub-720p.mp4
 ```
 
 #### Step 5 — subtitles
 If the subtitles are **inside** the `.mkv` as text:
-```powershell
+```bash
 ffmpeg -i input.mkv -map 0:s:0 ep01-en.srt
 ```
 If you got separate `.srt`/`.vtt` files, just rename them. `.ass` files:

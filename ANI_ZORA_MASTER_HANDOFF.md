@@ -89,7 +89,7 @@ Content is **manually entered by an admin**. Demo content shipped with the seed 
 ## 5. Folder Structure
 
 ```
-E:\tofayel_project\
+<project root>/
 ├─ ANI_ZORA_MASTER_HANDOFF.md      ← this file
 ├─ README.md
 ├─ docker-compose.yml
@@ -103,16 +103,17 @@ E:\tofayel_project\
 │  ├─ README.txt
 │  └─ google-service-account.json  ← REAL PRIVATE KEY. Never commit, never print.
 ├─ scripts/
-│  ├─ generate-demo-media.ps1      ← builds synthetic demo video/audio with ffmpeg
-│  └─ setup-dev-db.ps1
+│  ├─ generate-demo-media.ps1      ← optional Windows helper: synthetic demo video/audio
+│  └─ setup-dev-db.ps1             ← optional Windows helper: throwaway PostgreSQL
 ├─ nginx/                          ← optional reverse proxy config (profile: proxy)
 ├─ docs/
 │  ├─ ADMIN_GUIDE.md  ADS.md  ARCHITECTURE.md  DATABASE.md
 │  ├─ DEPLOYMENT.md   GOOGLE_DRIVE.md  PLAYER.md  STEP_BY_STEP_GUIDE.md
+│  └─ MEDIA_WORKER_DEPLOYMENT.md    ← transcoding worker: setup, sizing, recovery
 ├─ backend/
-│  ├─ Dockerfile, docker-entrypoint.sh, .env.example
+│  ├─ Dockerfile, Dockerfile.media-worker, docker-entrypoint.sh, .env.example
 │  ├─ prisma/{schema.prisma, migrations/, seed.ts, seed-data.ts, seed-art.ts}
-│  └─ src/{main.ts, app.module.ts, common/, config/, prisma/, modules/}
+│  └─ src/{main.ts, app.module.ts, common/, config/, prisma/, modules/, worker/}
 └─ frontend/
    ├─ Dockerfile, next.config.ts, eslint.config.mjs, vitest config
    └─ src/{app/, components/, lib/, styles/}
@@ -165,7 +166,6 @@ Key decisions:
 ### Correct workflow (Docker only)
 
 ```bash
-cd E:/tofayel_project
 docker compose up -d --build            # build + start everything
 docker compose ps                       # verify all healthy
 docker compose logs backend --tail=100 -f
@@ -582,6 +582,8 @@ Files: root `.env` (real, gitignored) ← used by `docker compose`; root `.env.e
 | `INTERNAL_API_TOKEN` | both | SSR calls bypass rate limiting | yes (compose fails without it) | **SET (secret)** | `<REQUIRED>` |
 | `MEDIA_SIGNING_SECRET` | backend | HMAC for media URLs | yes | **SET (secret)** | `<REQUIRED>` |
 | `MEDIA_SIGNED_URL_TTL` / `MEDIA_MAX_RANGE_CHUNK` | backend | 21600 s / 8 MB | no | defaults | — |
+| `MEDIA_WORKER_TOKEN` | backend + worker | Authenticates the media worker. Blank closes the worker endpoints. | for SINGLE_MASTER | empty | `<REQUIRED — openssl rand -base64 32>` |
+| `MASTERS_FOLDER` | backend + worker | Drive folder holding masters | no | `AniZora masters` | same |
 | `GOOGLE_DRIVE_ENABLED` | backend | Turn Drive on | for Drive media | **`true`** | `true` |
 | `GOOGLE_DRIVE_AUTH_MODE` | backend | `service_account` \| `oauth` | yes w/ Drive | `service_account` | `service_account` |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | backend | Path **inside the container** to the key | yes w/ Drive | `/run/secrets/google-service-account.json` | same |
@@ -863,7 +865,7 @@ Persistence
 ## 36. Useful Commands
 
 ```bash
-# --- Docker (from E:/tofayel_project) ---
+# --- Docker (from the project root) ---
 docker compose up -d --build              # build + start
 docker compose up -d --build backend frontend
 docker compose ps
@@ -900,19 +902,10 @@ npm run build            # production build check
 
 ## 37. Git State
 
-**`E:\tofayel_project` is NOT a git repository** — `git status` reports *fatal: not a git repository*. There is no branch, no history, no way to diff or revert. A `.gitignore` and `.gitattributes` exist (prepared for a future repo) and already exclude `.env`, `secrets/`, `*-service-account*.json`, `node_modules/`, build output.
+This **is** a git repository, on branch `main`. `.gitignore` and `.gitattributes` exclude `.env`, `secrets/`, `*-service-account*.json`, `node_modules/` and build output, so a routine `git add .` does not stage secrets — but check `git status --short` before committing anyway.
 
-Recommended first commit (only after confirming nothing secret is staged):
 
-```bash
-cd E:/tofayel_project
-git init
-git status --short          # verify .env and secrets/ are NOT listed
-git add .
-git commit -m "AniZora: initial import of the working tree"
-```
-
-Do **not** discard or reset any files — the current working tree is the only copy of the 8-issue fix batch.
+History is the record of record. Before any `reset --hard` or branch switch, confirm the working tree has nothing uncommitted you still need.
 
 ---
 

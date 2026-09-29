@@ -686,7 +686,7 @@ model Episode {
 /// One playable "server" entry for an episode, scoped to a single audio
 /// flavour. The player's Server selector lists these; the SUB/DUB selector
 /// filters them by `kind`.
-/// How far the local worker has got with a SINGLE_MASTER source.
+/// How far the media worker has got with a SINGLE_MASTER source.
 ///
 /// A job is only READY when every step either succeeded or was explicitly
 /// classified as not applicable for this master — a run that produced no 720p

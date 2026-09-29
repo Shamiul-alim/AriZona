@@ -67,6 +67,9 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       RUN_SEED: ${RUN_SEED:-false}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      # Both sides of the media-worker handshake need the same secret. Unset,
+      # the worker endpoints stay closed rather than open.
+      MEDIA_WORKER_TOKEN: ${MEDIA_WORKER_TOKEN:-}
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-anizora}:${POSTGRES_PASSWORD:-anizora}@postgres:5432/${POSTGRES_DB:-anizora}?schema=public
       # Prisma runs migrations over a direct session connection. Locally that is
@@ -138,6 +141,53 @@ services:
       start_period: 40s
     networks: [anizora]
 
+  # ---------------------------------------------------------------------------
+  # Media worker — turns one master into the quality ladder, audio files and
+  # subtitles. Separate from the API because transcoding is CPU-bound and runs
+  # for tens of minutes; it must not sit in the request path.
+  #
+  # Optional: the rest of the stack runs without it. Start it with
+  #   docker compose --profile media up -d media-worker
+  # See docs/MEDIA_WORKER_DEPLOYMENT.md.
+  # ---------------------------------------------------------------------------
+  media-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.media-worker
+    container_name: anizora-media-worker
+    restart: unless-stopped
+    profiles: ["media"]
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      API_URL: ${MEDIA_WORKER_API_URL:-http://backend:4000/api}
+      MEDIA_WORKER_TOKEN: ${MEDIA_WORKER_TOKEN:?MEDIA_WORKER_TOKEN is required}
+      # Drive credentials arrive as deployment secrets, never as a mounted path
+      # from someone's laptop.
+      GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_SERVICE_ACCOUNT_JSON_BASE64:-}
+      GOOGLE_DRIVE_CLIENT_ID: ${GOOGLE_DRIVE_CLIENT_ID:-}
+      GOOGLE_DRIVE_CLIENT_SECRET: ${GOOGLE_DRIVE_CLIENT_SECRET:-}
+      GOOGLE_DRIVE_REFRESH_TOKEN: ${GOOGLE_DRIVE_REFRESH_TOKEN:-}
+      RENDITION_FOLDER: ${RENDITION_FOLDER:-AniZora _renditions}
+      MAX_CACHE_BYTES: ${MAX_CACHE_BYTES:-8589934592}
+      POLL_SECONDS: ${MEDIA_WORKER_POLL_SECONDS:-30}
+      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-1}
+      MIN_FREE_DISK_BYTES: ${MIN_FREE_DISK_BYTES:-12884901888}
+      WORK_DIR: /var/tmp/anizora-media
+    volumes:
+      - media-work:/var/tmp/anizora-media
+    networks:
+      - anizora
+    # Encoding will take every core it is given. Cap it so the API stays
+    # responsive on a shared host.
+    deploy:
+      resources:
+        limits:
+          cpus: "${MEDIA_WORKER_CPUS:-2.0}"
+          memory: ${MEDIA_WORKER_MEMORY:-2g}
+
   frontend:
     build:
       context: ./frontend
@@ -199,6 +249,7 @@ volumes:
   postgres-data:
   redis-data:
   uploads-data:
+  media-work:
 
 networks:
   anizora:

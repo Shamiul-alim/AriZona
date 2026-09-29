@@ -9,7 +9,9 @@ import {
   Post,
   Put,
   Query,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ManaEvent, UserRole, UserStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -32,6 +34,7 @@ import { AdminAnimeService } from './admin-anime.service';
 import { AdminEpisodesService } from './admin-episodes.service';
 import { AdminSeasonsService } from './admin-seasons.service';
 import { AdminMediaJobsService } from './admin-media-jobs.service';
+import { MasterUploadService } from './master-upload.service';
 import { CompleteMediaJobDto } from './dto/admin-media-job.dto';
 import { AdminTaxonomyService } from './admin-taxonomy.service';
 import { AdminUsersService } from './admin-users.service';
@@ -97,6 +100,7 @@ export class AdminController {
     private readonly taxonomy: AdminTaxonomyService,
     private readonly seasonsService: AdminSeasonsService,
     private readonly mediaJobs: AdminMediaJobsService,
+    private readonly masterUpload: MasterUploadService,
     private readonly analytics: AnalyticsService,
     private readonly mediaRegistry: MediaProviderRegistry,
   ) {}
@@ -114,10 +118,32 @@ export class AdminController {
     return { stats, viewSeries: series, popularAnime: popular, mediaProviders: this.mediaRegistry.status() };
   }
 
+  // --- Master upload --------------------------------------------------------
+
+  /**
+   * Streams a master video into storage.
+   *
+   * The body is the file itself, not multipart: there is nothing else to send,
+   * and it lets the bytes go from the request straight into Drive without being
+   * buffered. The browser posts the File object directly, which also gives it
+   * real upload progress.
+   */
+  @Post('media/masters')
+  @ApiOperation({ summary: 'Upload one master video, streamed to storage' })
+  async uploadMaster(
+    @Req() req: Request,
+    @Query('filename') filename = 'master.mkv',
+    @Query('episodeId') episodeId?: string,
+  ) {
+    const prefix = episodeId ? `master-${episodeId}` : `master-${Date.now()}`;
+    const stored = await this.masterUpload.store(req, filename, prefix);
+    return { ...stored, episodeId: episodeId ?? null };
+  }
+
   // --- SINGLE_MASTER media jobs ---------------------------------------------
 
   @Get("media/jobs")
-  @ApiOperation({ summary: "SINGLE_MASTER sources awaiting the local worker" })
+  @ApiOperation({ summary: "SINGLE_MASTER sources awaiting a worker" })
   pendingMediaJobs(@Query("limit") limit = "20") {
     return this.mediaJobs.pending(Number(limit) || 20);
   }

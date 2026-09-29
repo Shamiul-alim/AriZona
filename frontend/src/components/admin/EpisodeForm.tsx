@@ -6,6 +6,7 @@ import { qs } from '@/lib/api';
 import { authFetch } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import { MediaProcessingStatus } from './MediaProcessingStatus';
+import { MasterSourceField } from './MasterSourceField';
 import { AdminHeader, Banner, Button, Card, Label, adminInput, adminSelect, adminTextarea } from './ui';
 import { ImageUploadField } from './ImageUploadField';
 
@@ -752,24 +753,11 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                         </div>
 
                         {source.mediaMode === 'SINGLE_MASTER' ? (
-                          <label className="mt-3 block">
-                            <Label
-                              required
-                              hint="Paste the Drive share link or file ID. The local worker probes it and builds every quality, audio track and subtitle from it — you do not add them by hand."
-                            >
-                              Master Drive URL
-                            </Label>
-                            <input
-                              value={source.masterDriveFileIdOrUrl}
-                              onChange={(e) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: e.target.value })}
-                              placeholder="https://drive.google.com/file/d/…"
-                              className={adminInput}
-                            />
-                            <span className="mt-1.5 block text-[11.5px] leading-relaxed text-ink-faint">
-                              Saving queues this episode. Run <code className="text-ink-muted">npm run media:worker</code>{' '}
-                              on the machine with FFmpeg to process it.
-                            </span>
-                          </label>
+                          <MasterSourceField
+                            value={source.masterDriveFileIdOrUrl}
+                            episodeId={episodeId}
+                            onChange={(master) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: master })}
+                          />
                         ) : null}
                       </div>
                     ) : null}

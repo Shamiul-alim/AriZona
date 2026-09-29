@@ -4,11 +4,14 @@ import { AdminController } from './admin.controller';
 import { AdminEpisodesService } from './admin-episodes.service';
 import { AdminSeasonsService } from './admin-seasons.service';
 import { AdminMediaJobsService } from './admin-media-jobs.service';
+import { MediaWorkerController } from './media-worker.controller';
+import { MediaWorkerGuard } from './media-worker.guard';
+import { MasterUploadService } from './master-upload.service';
 import { AdminTaxonomyService } from './admin-taxonomy.service';
 import { AdminUsersService } from './admin-users.service';
 
 @Module({
-  controllers: [AdminController],
+  controllers: [AdminController, MediaWorkerController],
   providers: [
     AdminAnimeService,
     AdminEpisodesService,
@@ -16,6 +19,8 @@ import { AdminUsersService } from './admin-users.service';
     AdminTaxonomyService,
     AdminSeasonsService,
     AdminMediaJobsService,
+    MediaWorkerGuard,
+    MasterUploadService,
   ],
   exports: [AdminAnimeService, AdminEpisodesService],
 })

@@ -51,7 +51,8 @@ simply switched off.
 
 ## 2. Put the values in your local `.env`
 
-Edit `E:\tofayel_project\.env` (never `.env.example`, and never commit `.env`):
+Edit the `.env` file at the root of your checkout (never `.env.example`, and
+never commit `.env`):
 
 ```dotenv
 GOOGLE_OAUTH_ENABLED=true

@@ -162,7 +162,9 @@ docker compose --profile proxy up -d
 
 ## Quick start without Docker
 
-**1. Database.** Point `DATABASE_URL` at any PostgreSQL 16 instance. On Windows,
+**1. Database.** Point `DATABASE_URL` at any PostgreSQL 16 instance. Any
+instance works; `docker compose up -d postgres` is the portable option. On
+Windows only,
 `scripts/setup-dev-db.ps1` will download PostgreSQL and run a throwaway instance
 inside `.dev-db/` on port 55432, touching nothing else on the machine:
 
@@ -191,7 +193,9 @@ npm run dev                   # http://localhost:3000
 ```
 
 **4. Demo media (optional).** The seed references six short video files that are
-generated locally — a test pattern plus a sine tone, entirely synthetic:
+generated locally — a test pattern plus a sine tone, entirely synthetic. On
+Windows there is a helper script; elsewhere, any `ffmpeg` that can write
+`lavfi` sources produces the same files:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/generate-demo-media.ps1
@@ -199,6 +203,32 @@ powershell -ExecutionPolicy Bypass -File scripts/generate-demo-media.ps1
 
 They exist so quality switching, audio switching, seeking and the skip markers
 are genuinely verifiable before you have real content.
+
+---
+
+## Media worker
+
+Episodes can be added two ways.
+
+**MANUAL_VARIANTS** — you supply one file per quality and per track. Nothing
+runs in the background.
+
+**SINGLE_MASTER** — you upload one master video (or paste a Drive link to one)
+and a separate worker builds the quality ladder, one file per embedded audio
+stream, and a WebVTT file per embedded text subtitle. The admin does nothing
+else per episode.
+
+The worker is a container with its own FFmpeg, so it does not depend on what is
+installed on any particular machine:
+
+```bash
+docker compose --profile media up -d media-worker
+```
+
+It needs sustained CPU and several GB of scratch disk, which is why it is a
+separate service rather than part of the API. Setup, required secrets, sizing,
+queue behaviour and recovery are in
+[docs/MEDIA_WORKER_DEPLOYMENT.md](docs/MEDIA_WORKER_DEPLOYMENT.md).
 
 ---
 
@@ -261,6 +291,7 @@ are genuinely verifiable before you have real content.
 | `GOOGLE_DRIVE_*` | Drive credentials — see [docs/GOOGLE_DRIVE.md](docs/GOOGLE_DRIVE.md) |
 | `NEXT_PUBLIC_ADSENSE_CLIENT_ID` | AdSense publisher ID |
 | `MAIL_*` | SMTP; `MAIL_DRIVER=log` prints emails instead of sending |
+| `MEDIA_WORKER_TOKEN` | Shared secret for the media worker. Unset closes the worker endpoints. |
 
 > `NEXT_PUBLIC_*` values are compiled into the browser bundle at **build** time.
 > In Docker they are build args, not runtime variables — changing one means

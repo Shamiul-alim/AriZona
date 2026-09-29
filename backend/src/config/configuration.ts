@@ -53,6 +53,13 @@ export const envSchema = z.object({
 
   GOOGLE_DRIVE_ENABLED: booleanish.default(false),
   GOOGLE_DRIVE_AUTH_MODE: z.enum(['service_account', 'oauth']).default('service_account'),
+  /**
+   * Shared secret the media worker presents. It is not an admin session: it
+   * authorises exactly the job endpoints and nothing else, so a compromised
+   * worker cannot touch the catalogue or users. Unset disables those endpoints
+   * entirely rather than leaving them open.
+   */
+  MEDIA_WORKER_TOKEN: z.string().optional().default(''),
   GOOGLE_SERVICE_ACCOUNT_FILE: z.string().optional().default(''),
   GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: z.string().optional().default(''),
   GOOGLE_DRIVE_CLIENT_ID: z.string().optional().default(''),
@@ -130,6 +137,7 @@ export interface AppConfig {
   };
   bcryptRounds: number;
   admin: { email: string; username: string; password: string };
+  mediaWorkerToken: string;
   googleOAuth: { enabled: boolean; clientId: string; clientSecret: string; callbackUrl: string };
   drive: {
     enabled: boolean;
@@ -185,6 +193,7 @@ export function buildConfig(env: Env): AppConfig {
     },
     bcryptRounds: env.BCRYPT_ROUNDS,
     admin: { email: env.ADMIN_EMAIL, username: env.ADMIN_USERNAME, password: env.ADMIN_PASSWORD },
+    mediaWorkerToken: env.MEDIA_WORKER_TOKEN,
     googleOAuth: {
       enabled: env.GOOGLE_OAUTH_ENABLED && !!env.GOOGLE_OAUTH_CLIENT_ID && !!env.GOOGLE_OAUTH_CLIENT_SECRET,
       clientId: env.GOOGLE_OAUTH_CLIENT_ID,

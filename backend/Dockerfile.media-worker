@@ -1,0 +1,73 @@
+# =============================================================================
+# AniZora media worker — FFmpeg transcoding service
+# =============================================================================
+# Shares the backend's source tree on purpose: the worker imports the same probe
+# parser and ladder planner the API uses, so there is one implementation of
+# those decisions rather than two that can drift.
+#
+# The image carries its own FFmpeg. Nothing here depends on what happens to be
+# installed on the host, which is what made the previous arrangement tied to one
+# particular machine.
+# =============================================================================
+
+# --- Stage 1: dependencies ---------------------------------------------------
+FROM node:22-alpine AS deps
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+RUN npm install --no-audit --no-fund
+
+# --- Stage 2: build ----------------------------------------------------------
+FROM node:22-alpine AS build
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+RUN npx prisma generate
+RUN npm run build
+RUN npm prune --omit=dev
+
+# --- Stage 3: runtime --------------------------------------------------------
+FROM node:22-alpine AS production
+
+# FFmpeg comes from the Alpine release the base image is pinned to, so the
+# version moves only when node:22-alpine does. `ffmpeg -version` is printed at
+# startup and recorded in the deployment doc; the worker refuses to run against
+# a build older than 2020, which cannot decode 10-bit HEVC correctly.
+RUN apk add --no-cache libc6-compat openssl tini ffmpeg
+
+WORKDIR /app
+ENV NODE_ENV=production
+# Overridden by the deployment; a sensible default keeps the image runnable.
+ENV WORK_DIR=/var/tmp/anizora-media
+ENV MEDIA_WORKER_CONCURRENCY=1
+
+RUN addgroup -g 1001 -S nodejs && adduser -S worker -u 1001
+
+COPY --from=build --chown=worker:nodejs /app/node_modules ./node_modules
+COPY --from=build --chown=worker:nodejs /app/dist ./dist
+COPY --from=build --chown=worker:nodejs /app/prisma ./prisma
+COPY --from=build --chown=worker:nodejs /app/package.json ./package.json
+
+# Transcoding needs real scratch space; make it a volume so the host can put it
+# on a disk with room rather than the container's writable layer.
+RUN mkdir -p ${WORK_DIR} && chown -R worker:nodejs ${WORK_DIR}
+VOLUME ["/var/tmp/anizora-media"]
+
+USER worker
+
+# The worker holds no port. This checks that the process can still reach the
+# API and that FFmpeg is present, which are the two ways it silently stops being
+# useful.
+HEALTHCHECK --interval=60s --timeout=15s --start-period=20s --retries=3 \
+  CMD node -e "const u=process.env.API_URL;if(!u)process.exit(1);fetch(u+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+      && ffmpeg -version > /dev/null 2>&1 || exit 1
+
+# tini reaps the FFmpeg children and forwards SIGTERM, so a stop finishes the
+# current step instead of leaving a half-written rendition.
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/worker/media-worker.js"]
