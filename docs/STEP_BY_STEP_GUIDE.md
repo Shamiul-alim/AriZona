@@ -113,9 +113,11 @@ keeps your position — so each needs its own file.
 
 Two or three qualities is plenty. Every file costs Drive space and upload time.
 
-> **You usually do not need any of this.** Set the episode's media mode to
-> **SINGLE_MASTER**, upload one master file, and the media worker builds every
-> quality, audio track and subtitle for you. See
+> **You usually do not need the audio and subtitle parts of this.** Upload your
+> quality files and the media worker reads the audio languages and subtitles out
+> of them for you — no typing, and your video is not re-encoded. You still
+> prepare the quality files yourself, which is what the rest of this section is
+> about. See
 > [MEDIA_WORKER_DEPLOYMENT.md](MEDIA_WORKER_DEPLOYMENT.md). The manual route
 > below is for preparing files by hand when you want to control the encode
 > yourself.

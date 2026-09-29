@@ -112,20 +112,26 @@ if (-not $UseExistingConfig) {
 
     Write-Host ''
     Write-Host '  Google Drive credentials (from whoever handed over the project).' -ForegroundColor DarkGray
-    $saB64 = Read-Secret 'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64'
+    Write-Host '  These three let the worker read your video and save the tracks it finds.' -ForegroundColor DarkGray
     $clientId = Read-Secret 'GOOGLE_DRIVE_CLIENT_ID'
     $clientSecret = Read-Secret 'GOOGLE_DRIVE_CLIENT_SECRET'
     $refreshToken = Read-Secret 'GOOGLE_DRIVE_REFRESH_TOKEN'
+
+    Write-Host ''
+    Write-Host '  Optional: a service-account key, if you were given one. It only narrows' -ForegroundColor DarkGray
+    Write-Host '  reading to read-only; the worker works fine without it.' -ForegroundColor DarkGray
+    Write-Host '  Press Enter to skip.' -ForegroundColor DarkGray
+    $saB64 = Read-Secret 'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (optional)' -Optional
 
     $lines = @(
         '# AniZora media worker configuration.',
         '# Written by install-worker.ps1. Holds live credentials - do not share.',
         "API_URL=$apiUrl",
         "MEDIA_WORKER_TOKEN=$token",
-        "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$saB64",
         "GOOGLE_DRIVE_CLIENT_ID=$clientId",
         "GOOGLE_DRIVE_CLIENT_SECRET=$clientSecret",
         "GOOGLE_DRIVE_REFRESH_TOKEN=$refreshToken",
+        "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$saB64",
         'MEDIA_WORKER_CONCURRENCY=1'
     )
     # UTF8 without BOM: Docker reads env files byte for byte, and a BOM would
@@ -151,6 +157,7 @@ if (-not $UseExistingConfig) {
 
 Write-Step '3. Building the worker image'
 Write-Note 'First run downloads the source and FFmpeg. This takes a few minutes.'
+Write-Note 'After that the worker only reads your videos - it never re-encodes them.'
 
 docker compose -f $Compose --env-file $EnvFile build
 if ($LASTEXITCODE -ne 0) {

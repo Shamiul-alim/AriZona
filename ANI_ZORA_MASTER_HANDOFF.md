@@ -582,7 +582,7 @@ Files: root `.env` (real, gitignored) ← used by `docker compose`; root `.env.e
 | `INTERNAL_API_TOKEN` | both | SSR calls bypass rate limiting | yes (compose fails without it) | **SET (secret)** | `<REQUIRED>` |
 | `MEDIA_SIGNING_SECRET` | backend | HMAC for media URLs | yes | **SET (secret)** | `<REQUIRED>` |
 | `MEDIA_SIGNED_URL_TTL` / `MEDIA_MAX_RANGE_CHUNK` | backend | 21600 s / 8 MB | no | defaults | — |
-| `MEDIA_WORKER_TOKEN` | backend + worker | Authenticates the media worker. Blank closes the worker endpoints. | for SINGLE_MASTER | empty | `<REQUIRED — openssl rand -base64 32>` |
+| `MEDIA_WORKER_TOKEN` | backend + worker | Authenticates the media worker. Blank closes the worker endpoints. | for auto tracks | empty | `<REQUIRED — openssl rand -base64 32>` |
 | `MASTERS_FOLDER` | backend + worker | Drive folder holding masters | no | `AniZora masters` | same |
 | `GOOGLE_DRIVE_ENABLED` | backend | Turn Drive on | for Drive media | **`true`** | `true` |
 | `GOOGLE_DRIVE_AUTH_MODE` | backend | `service_account` \| `oauth` | yes w/ Drive | `service_account` | `service_account` |

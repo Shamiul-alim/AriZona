@@ -121,6 +121,12 @@ export class ProducedSubtitleDto {
  * transcoder needs.
  */
 export class RegisterMediaDto {
+  @ApiPropertyOptional({ description: 'The file the tracks were read from. Track jobs send it; master jobs do not.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  trackSourceFileId?: string;
+
   @ApiProperty({ type: [ProducedVariantDto] })
   @IsArray()
   @ArrayMaxSize(8)

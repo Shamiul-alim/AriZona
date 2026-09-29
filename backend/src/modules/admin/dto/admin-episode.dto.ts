@@ -260,14 +260,35 @@ export class MediaSourceDto {
 
   @ApiPropertyOptional({
     description:
-      "SINGLE_MASTER: the one Drive file or share URL every rendition, audio track and subtitle is derived from. " +
-      "Setting it queues the source for the media worker; the admin supplies nothing else. " +
-      "Leave empty for MANUAL_VARIANTS, where the admin supplies each file.",
+      'Legacy AUTO_MASTER: one Drive file or share URL from which a quality ladder is transcoded. ' +
+      'Kept so episodes made that way keep working. New episodes leave this empty and supply each quality.',
+    deprecated: true,
   })
   @IsOptional()
   @IsString()
   @MaxLength(400)
   masterDriveFileIdOrUrl?: string;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Read the audio and subtitle streams out of one of the supplied qualities and register what is found. ' +
+      'The video is never touched. Off by default so sources saved before this existed, including any with ' +
+      'hand-entered tracks, are left exactly as they are.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  autoTracks?: boolean;
+
+  @ApiPropertyOptional({
+    enum: VideoQuality,
+    description:
+      'Which supplied quality to read those tracks from. Omit for the highest available, which is the ' +
+      'normal choice; set it only when one particular file is known to carry the full set of streams.',
+  })
+  @IsOptional()
+  @IsEnum(VideoQuality)
+  trackSourceQuality?: VideoQuality;
 
   @ApiPropertyOptional({ type: [MediaVariantDto] })
   @IsOptional()

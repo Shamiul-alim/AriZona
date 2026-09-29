@@ -250,3 +250,103 @@ export function planLadder(sourceHeight: number): LadderStep[] {
 export function canServeMasterDirectly(summary: MasterSummary): boolean {
   return Boolean(summary.video?.browserPlayable);
 }
+
+// --- track source selection --------------------------------------------------
+
+/**
+ * Qualities worth reading tracks from, best first.
+ *
+ * AUTO is not here on purpose: it is a player-side instruction, not a file.
+ */
+const TRACK_SOURCE_PREFERENCE = ['Q_2160P', 'Q_1440P', 'Q_1080P', 'Q_720P', 'Q_480P', 'Q_360P', 'Q_240P'] as const;
+
+export interface TrackSourceCandidate {
+  quality: string;
+  driveFileId: string | null;
+  isActive?: boolean;
+}
+
+/**
+ * Which uploaded file to read audio and subtitle streams from.
+ *
+ * The highest quality by default, because that is the one most likely to carry
+ * the full set of streams. Only one file is ever inspected: the qualities of an
+ * episode are the same content, and probing all four would cost four downloads
+ * to learn the same thing.
+ *
+ * `preferred` lets an operator override that when they know one particular file
+ * is the complete one. A preference that is not actually present falls back to
+ * the automatic choice rather than failing — an episode whose 1080p was removed
+ * should still get its tracks.
+ */
+export function pickTrackSource(
+  candidates: TrackSourceCandidate[],
+  preferred?: string | null,
+): TrackSourceCandidate | null {
+  const usable = candidates.filter((c) => c.driveFileId && c.isActive !== false);
+  if (usable.length === 0) return null;
+
+  if (preferred && preferred !== 'AUTO') {
+    const exact = usable.find((c) => c.quality === preferred);
+    if (exact) return exact;
+  }
+
+  for (const quality of TRACK_SOURCE_PREFERENCE) {
+    const match = usable.find((c) => c.quality === quality);
+    if (match) return match;
+  }
+  // A quality this build has never heard of is still better than no tracks.
+  return usable[0];
+}
+
+/** Human form of a quality enum, for admin copy: Q_1080P -> 1080p. */
+export function qualityLabel(quality: string): string {
+  const match = /^Q_(\d+)P$/.exec(quality);
+  return match ? `${match[1]}p` : quality;
+}
+
+/**
+ * Whether an embedded audio stream has to be re-encoded to be playable.
+ *
+ * AAC in an MP4 container is what the player already expects, so an AAC stream
+ * is copied out untouched: no quality loss, and seconds rather than minutes.
+ * Anything else is converted — audio only, never the video.
+ */
+export function audioNeedsConversion(codec: string | undefined): boolean {
+  return (codec ?? '').toLowerCase() !== 'aac';
+}
+
+// --- track extraction --------------------------------------------------------
+
+/**
+ * FFmpeg arguments for pulling one audio stream out as its own file.
+ *
+ * Built here rather than inline so the rule that matters can be tested: this
+ * reads no video. An admin who supplies their own qualities has asked for their
+ * files to be left alone, and re-encoding them would cost hours to produce
+ * something worse than what they gave us.
+ */
+export function audioExtractionArgs(source: string, streamIndex: number, out: string, copy: boolean): string[] {
+  return [
+    '-y', '-i', source,
+    '-map', `0:${streamIndex}`,
+    // No video in, no video out.
+    '-vn',
+    ...(copy ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k', '-ac', '2']),
+    '-movflags', '+faststart',
+    out,
+  ];
+}
+
+/** FFmpeg arguments for converting one text subtitle stream to WebVTT. */
+export function subtitleExtractionArgs(source: string, streamIndex: number, out: string): string[] {
+  return ['-y', '-i', source, '-map', `0:${streamIndex}`, '-c:s', 'webvtt', out];
+}
+
+/**
+ * Flags that mean "this command re-encodes video".
+ *
+ * Used by the tests to hold the track pipeline to its promise. Listed rather
+ * than inferred, because the guarantee is worth stating explicitly.
+ */
+export const VIDEO_ENCODING_FLAGS = ['libx264', 'libx265', 'libvpx', '-vf', '-filter:v', '-c:v', '-vcodec'] as const;

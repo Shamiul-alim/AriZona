@@ -131,13 +131,20 @@ export class AdminController {
    * real upload progress.
    */
   @Post('media/masters')
-  @ApiOperation({ summary: 'Upload one master video, streamed to storage' })
+  @ApiOperation({ summary: 'Upload one video file, streamed straight to storage' })
   async uploadMaster(
     @Req() req: Request,
     @Query('filename') filename = 'master.mkv',
     @Query('episodeId') episodeId?: string,
+    @Query('suffix') suffix?: string,
   ) {
-    const prefix = episodeId ? `master-${episodeId}` : `master-${Date.now()}`;
+    // The stored name is built from ids we control. `suffix` separates the
+    // several files of one episode — its 1080p from its 720p — which would
+    // otherwise overwrite each other. Anything but a plain word is dropped
+    // rather than trusted.
+    const safeSuffix = (suffix ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+    const base = episodeId ? `master-${episodeId}` : `master-${Date.now()}`;
+    const prefix = safeSuffix ? `${base}-${safeSuffix}` : base;
     const stored = await this.masterUpload.store(req, filename, prefix);
     return { ...stored, episodeId: episodeId ?? null };
   }

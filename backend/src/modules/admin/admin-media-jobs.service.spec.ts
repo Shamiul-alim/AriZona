@@ -31,12 +31,12 @@ function service(prisma: ReturnType<typeof prismaDouble>) {
 
 describe('AdminMediaJobsService', () => {
   describe('pending', () => {
-    it('offers only PENDING and FAILED work on episodes that still exist', async () => {
+    it('offers both kinds of job: a legacy master, and tracks from supplied qualities', async () => {
       const prisma = prismaDouble();
       await service(prisma).pending();
 
       const { where } = prisma.mediaSource.findMany.mock.calls[0][0];
-      expect(where.masterDriveFileId).toEqual({ not: null });
+      expect(where.OR).toEqual([{ masterDriveFileId: { not: null } }, { autoTracks: true }]);
       expect(where.processingState).toEqual({
         in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED],
       });
@@ -75,10 +75,11 @@ describe('AdminMediaJobsService', () => {
       await expect(service(prisma).claim('source-1')).resolves.toBeNull();
     });
 
-    it('only claims a job that is PENDING or FAILED', async () => {
+    it('only claims a job that is PENDING or FAILED, of either kind', async () => {
       const prisma = prismaDouble();
       await service(prisma).claim('source-1');
       const { where, data } = prisma.mediaSource.updateMany.mock.calls.at(-1)![0];
+      expect(where.OR).toEqual([{ masterDriveFileId: { not: null } }, { autoTracks: true }]);
       expect(where.processingState).toEqual({
         in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED],
       });
@@ -144,14 +145,17 @@ describe('AdminMediaJobsService', () => {
   });
 
   describe('registerProducedMedia', () => {
-    function registering(existingVariantId: string | null) {
+    function registering(existingVariantId: string | null, source: Record<string, unknown> = {}) {
       const prisma = prismaDouble({
         mediaSource: {
           findUnique: jest.fn().mockResolvedValue({
             id: 'source-1',
             episodeId: 'episode-1',
             masterDriveFileId: 'drive-master',
+            autoTracks: false,
+            ...source,
           }),
+          update: jest.fn().mockResolvedValue({}),
         },
       });
       prisma.mediaVariant.findFirst.mockResolvedValue(existingVariantId ? { id: existingVariantId } : null);
@@ -187,13 +191,65 @@ describe('AdminMediaJobsService', () => {
       expect(prisma.subtitleTrack.deleteMany).toHaveBeenCalledWith({ where: { episodeId: 'episode-1' } });
     });
 
-    it('refuses a source that has no master to process', async () => {
+
+    it('clears tracks a new source no longer carries', async () => {
+      // Present-but-empty means "this is the whole set". An episode that used
+      // to have two languages and now has one must lose the other, or the
+      // player offers a track that is not there any more.
+      const prisma = registering(null);
+      await service(prisma).registerProducedMedia('source-1', {
+        variants: [],
+        audioTracks: [],
+        subtitleTracks: [],
+      });
+      expect(prisma.audioTrack.deleteMany).toHaveBeenCalledWith({ where: { episodeId: 'episode-1' } });
+      expect(prisma.subtitleTrack.deleteMany).toHaveBeenCalledWith({ where: { episodeId: 'episode-1' } });
+      expect(prisma.audioTrack.createMany).not.toHaveBeenCalled();
+      expect(prisma.subtitleTrack.createMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves tracks alone when the worker does not mention them', async () => {
+      const prisma = registering(null);
+      await service(prisma).registerProducedMedia('source-1', { variants: [] });
+      expect(prisma.audioTrack.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.subtitleTrack.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('accepts a track-only source, which has no master', async () => {
+      const prisma = registering(null, { masterDriveFileId: null, autoTracks: true });
+      await expect(
+        service(prisma).registerProducedMedia('source-1', { variants: [], audioTracks: [], subtitleTracks: [] }),
+      ).resolves.toBeDefined();
+    });
+
+    it('records which file the tracks were read from', async () => {
+      // So the admin panel can say "tracks from 1080p", and so replacing that
+      // file re-runs detection instead of keeping tracks from a file that is
+      // no longer the source.
+      const prisma = registering(null, { masterDriveFileId: null, autoTracks: true });
+      await service(prisma).registerProducedMedia('source-1', {
+        variants: [],
+        audioTracks: [],
+        subtitleTracks: [],
+        trackSourceFileId: 'drive-1080p',
+      });
+      expect(prisma.mediaSource.update).toHaveBeenCalledWith({
+        where: { id: 'source-1' },
+        data: { trackSourceFileId: 'drive-1080p' },
+      });
+    });
+
+    it('refuses a source that is neither a master job nor a track job', async () => {
       const prisma = prismaDouble({
         mediaSource: {
-          findUnique: jest.fn().mockResolvedValue({ id: 's', episodeId: 'e', masterDriveFileId: null }),
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ id: 's', episodeId: 'e', masterDriveFileId: null, autoTracks: false }),
         },
       });
-      await expect(service(prisma).registerProducedMedia('s', payload)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service(prisma).registerProducedMedia('s', { variants: [] })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
   });
 });

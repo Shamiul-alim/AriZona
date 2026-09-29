@@ -1,24 +1,27 @@
 # AniZora Media Worker
 
-This folder installs the machine that turns one uploaded video into everything
-the player needs.
+This folder installs the helper that finds the audio languages and subtitles
+inside your video files and adds them to the player.
 
 You set it up **once**. After that, adding an episode is:
 
-> Admin → Episode → **SINGLE_MASTER** → upload one file → **Save**
+> Admin → Episode → upload your 1080p, 720p, 480p, 360p → **Save**
 
-Nothing else, ever, per episode.
+Nothing else, ever, per episode. Your video files are used exactly as you
+prepared them — nothing is re-encoded.
 
 ---
 
 ## What this is, in one paragraph
 
 AniZora runs on the internet: the website, the API, the database and the video
-storage are all hosted. The one thing that cannot be hosted cheaply is video
-encoding — it needs real processor time for tens of minutes per episode, which
-no free hosting plan allows. So that one job runs on a machine you already own.
-It has no website, no password, no port open to the internet. It quietly asks
-AniZora "anything to do?", and when there is, it does it.
+storage are all hosted. The one thing that cannot run there is opening your
+video files to look inside them — that needs a tool called FFmpeg and a few
+minutes per episode, which no free hosting plan allows. So that one job runs on
+a machine you already own. It has no website, no password, no port open to the
+internet. It quietly asks AniZora "anything to do?", and when there is, it
+reads one of your files, pulls out the audio languages and subtitles, and adds
+them to the player.
 
 ---
 
@@ -27,14 +30,17 @@ AniZora "anything to do?", and when there is, it does it.
 | | |
 | --- | --- |
 | A machine | Windows 10/11, or Linux. A desktop, laptop, mini PC or NAS is fine. |
-| Processor | 2 cores or more. |
-| Memory | 4 GB recommended. |
-| Free disk | 15–20 GB of spare space. |
+| Processor | 2 cores is comfortable; 1 works. |
+| Memory | 2 GB. |
+| Free disk | 5 GB of spare space. |
 | Internet | Ordinary broadband. No fixed IP, no router changes. |
 | Docker | Free. Installed once — the instructions below say how. |
 
 You do **not** need FFmpeg, Node.js, Git, a credit card, or any paid service.
 FFmpeg is already inside the worker.
+
+It is a light job. The machine spends most of it downloading one file; it does
+not sit at full tilt for an hour the way video conversion would.
 
 The machine does not need to be on all the time. See
 [When the machine is off](#when-the-machine-is-off).
@@ -58,9 +64,10 @@ Explorer, then **File → Open Windows PowerShell**.
 .\install-worker.ps1
 ```
 
-It asks for the API address, the worker token, and the Google Drive
-credentials. Whoever handed AniZora to you provides these. Nothing you type is
-shown on screen or saved to your command history.
+It asks for the API address, the worker token, and three Google Drive values.
+Whoever handed AniZora to you provides these. Nothing you type is shown on
+screen or saved to your command history. (It also offers an optional
+service-account key — press Enter to skip it unless you were given one.)
 
 The installer then builds the worker, checks every credential actually works,
 and starts it.
@@ -134,10 +141,11 @@ to know whether it is running.
 
 ## When the machine is off
 
-Nothing breaks and nothing is lost.
+Nothing breaks, nothing is lost, and **your episodes still play**.
 
-- Uploading a master still works.
-- The episode sits at **Queued**.
+- Uploading the quality files still works, and viewers can watch them
+  immediately.
+- Only the audio and subtitle detection waits.
 - The admin panel says *worker offline — processing will begin automatically
   when a worker comes online*.
 - Next time this machine starts, Docker starts, the worker starts, and it picks

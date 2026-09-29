@@ -27,7 +27,12 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { google } from 'googleapis';
 import {
+  audioExtractionArgs,
+  audioNeedsConversion,
+  pickTrackSource,
   planLadder,
+  qualityLabel,
+  subtitleExtractionArgs,
   summariseMaster,
   type MasterSummary,
   type ProbeResult,
@@ -56,8 +61,14 @@ const POLL_SECONDS = Number(process.env.POLL_SECONDS ?? 30);
  * only on a host with the headroom.
  */
 const CONCURRENCY = Math.max(1, Number(process.env.MEDIA_WORKER_CONCURRENCY ?? 1));
-/** Refuse to start a job without room for the master plus its renditions. */
+/** Refuse to start a transcoding job without room for the master plus its renditions. */
 const MIN_FREE_BYTES = Number(process.env.MIN_FREE_DISK_BYTES ?? 12 * 1024 ** 3);
+/**
+ * A track job holds one video file and writes a few audio and subtitle files
+ * beside it, so it needs a fraction of what a ladder does. Keeping the floor
+ * low is the difference between running on a spare laptop and not.
+ */
+const MIN_FREE_BYTES_TRACKS = Number(process.env.MIN_FREE_DISK_TRACKS_BYTES ?? 3 * 1024 ** 3);
 const ONCE = process.argv.includes('--once');
 /** Validate the configuration and exit. What the installer runs to prove setup works. */
 const CHECK = process.argv.includes('--check');
@@ -222,11 +233,15 @@ async function freeSpace(dir: string): Promise<number> {
 // --- Google Drive -----------------------------------------------------------
 
 /**
- * Service-account credentials, supplied as a deployment secret. A file path is
- * still accepted for hosts that mount secrets as files, but no path is baked in
- * anywhere.
+ * Service-account credentials, if any are configured.
+ *
+ * Optional. A service account cannot upload — it has no Drive storage quota of
+ * its own, so anything it creates has nowhere to live — which means the OAuth
+ * credential is needed regardless, and that one can read as well as write.
+ * Keeping this supported costs nothing and avoids breaking a deployment that
+ * already uses it.
  */
-function serviceAccountCredentials(): Record<string, unknown> {
+function serviceAccountCredentials(): Record<string, unknown> | null {
   const inline = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
   if (inline) return JSON.parse(inline) as Record<string, unknown>;
 
@@ -236,15 +251,22 @@ function serviceAccountCredentials(): Record<string, unknown> {
   const file = process.env.GOOGLE_SERVICE_ACCOUNT_FILE?.trim();
   if (file) return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
 
-  throw new Error(
-    'No Drive credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON (or _BASE64, or _FILE). See docs/MEDIA_WORKER_DEPLOYMENT.md.',
-  );
+  return null;
 }
 
-/** Read-only client for pulling masters. */
-function masterClient() {
+/**
+ * Client for reading the file the tracks come from.
+ *
+ * Prefers a service account when one is configured, because read-only is the
+ * narrower authority. Without one it reads with the same OAuth credential it
+ * uploads with — which grants nothing extra, since the worker must hold that
+ * credential either way.
+ */
+function readClient() {
+  const credentials = serviceAccountCredentials();
+  if (!credentials) return uploadClient();
   const auth = new google.auth.GoogleAuth({
-    credentials: serviceAccountCredentials(),
+    credentials,
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   });
   return google.drive({ version: 'v3', auth });
@@ -327,8 +349,8 @@ async function upload(drive: Drive, parent: string, filePath: string, name: stri
   return id;
 }
 
-async function downloadMaster(fileId: string, dest: string): Promise<void> {
-  const drive = masterClient();
+async function downloadDriveFile(fileId: string, dest: string): Promise<void> {
+  const drive = readClient();
   const meta = await drive.files.get({ fileId, fields: 'size,name', supportsAllDrives: true });
   const expected = Number(meta.data.size ?? 0);
 
@@ -347,7 +369,7 @@ async function downloadMaster(fileId: string, dest: string): Promise<void> {
   const got = fs.statSync(dest).size;
   if (expected > 0 && got !== expected) {
     fs.rmSync(dest, { force: true });
-    throw new Error(`Master download incomplete: expected ${expected} bytes, got ${got}`);
+    throw new Error(`Download incomplete: expected ${expected} bytes, got ${got}`);
   }
   step('download', `${MB(got)} MB`);
 }
@@ -383,19 +405,24 @@ async function encodeVideo(master: string, height: number, kbps: number, out: st
   );
 }
 
-async function encodeAudio(master: string, streamIndex: number, out: string): Promise<void> {
-  await run(
-    FFMPEG,
-    ['-y', '-i', master, '-map', `0:${streamIndex}`, '-vn', '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-movflags', '+faststart', out],
-    `audio stream ${streamIndex}`,
-  );
+/**
+ * One embedded audio stream, pulled out as its own playable file.
+ *
+ * `-vn` is the important part: the video is never read, re-encoded or copied
+ * here. An AAC stream is copied out bit for bit — no quality loss and seconds
+ * rather than minutes — and anything else is converted to AAC, which is what
+ * the player expects.
+ */
+async function extractAudio(source: string, streamIndex: number, out: string, copy: boolean): Promise<void> {
+  await run(FFMPEG, audioExtractionArgs(source, streamIndex, out, copy), `audio stream ${streamIndex}`);
 }
 
-async function encodeSubtitle(master: string, streamIndex: number, out: string): Promise<void> {
-  await run(FFMPEG, ['-y', '-i', master, '-map', `0:${streamIndex}`, '-c:s', 'webvtt', out], `subtitle stream ${streamIndex}`);
+/** One embedded text subtitle, converted to WebVTT. Reads no video. */
+async function extractSubtitle(source: string, streamIndex: number, out: string): Promise<void> {
+  await run(FFMPEG, subtitleExtractionArgs(source, streamIndex, out), `subtitle stream ${streamIndex}`);
 }
 
-async function probeMaster(file: string): Promise<MasterSummary> {
+async function probeMedia(file: string): Promise<MasterSummary> {
   const raw = await capture(FFPROBE, ['-v', 'error', '-show_format', '-show_streams', '-print_format', 'json', file]);
   return summariseMaster(JSON.parse(raw) as ProbeResult);
 }
@@ -404,7 +431,11 @@ async function probeMaster(file: string): Promise<MasterSummary> {
 
 interface Job {
   id: string;
-  masterDriveFileId: string;
+  /** Legacy transcoding job when set; a track job otherwise. */
+  masterDriveFileId: string | null;
+  autoTracks: boolean;
+  /** Which supplied quality to read tracks from. Null means the highest. */
+  trackSourceQuality: string | null;
   label: string;
   kind: string;
   episode: {
@@ -426,137 +457,233 @@ const describe = (job: Job) =>
 /** A safe basename: derived from ids we control, never from a filename. */
 const baseName = (job: Job) => `${job.episode.anime.slug.replace(/[^a-z0-9-]/gi, '')}-e${job.episode.number}`;
 
+/**
+ * Builds the quality ladder by transcoding.
+ *
+ * Only ever reached by a legacy master job. A normal job supplies its own
+ * qualities and must never come through here — encoding somebody's video when
+ * they asked for track detection would be both slow and wrong.
+ */
+async function buildLadder(
+  job: Job,
+  summary: MasterSummary,
+  masterPath: string,
+  jobDir: string,
+  base: string,
+  drive: Drive,
+  renditions: string,
+): Promise<Array<{ quality: string; driveFileId: string }>> {
+  if (!summary.video) throw new Error('The master has no video stream');
+  const ladder = planLadder(summary.video.height);
+  if (ladder.length === 0) throw new Error(`Unusable source height ${summary.video.height}`);
+
+  const known = new Map(job.variants.filter((v) => v.driveFileId).map((v) => [v.quality, v.driveFileId!]));
+  const variants: Array<{ quality: string; driveFileId: string }> = [];
+
+  for (const rung of ladder) {
+    if (stopping) throw new Error('Stopped before this rendition was built');
+    const already = known.get(rung.quality);
+    if (already) {
+      step(`${rung.height}p`, 'reused');
+      variants.push({ quality: rung.quality, driveFileId: already });
+      continue;
+    }
+
+    const name = `${base}-${rung.height}p.mp4`;
+    const adopted = await existingUpload(drive, renditions, name);
+    if (adopted) {
+      step(`${rung.height}p`, 'adopted an earlier upload');
+      variants.push({ quality: rung.quality, driveFileId: adopted });
+      continue;
+    }
+
+    await progress(job.id, `ENCODING_${rung.height}P`, `${variants.length + 1} of ${ladder.length}`);
+    const out = path.join(jobDir, name);
+    await encodeVideo(masterPath, rung.height, rung.kbps, out);
+    await progress(job.id, 'UPLOADING', `${rung.height}p`);
+    const id = await upload(drive, renditions, out, name);
+    step(`${rung.height}p`, `built ${MB(fs.statSync(out).size)} MB`);
+    await fsp.rm(out, { force: true });
+    variants.push({ quality: rung.quality, driveFileId: id });
+  }
+  return variants;
+}
+
+interface BuiltTracks {
+  audioTracks: Array<{ language: string; label: string; driveFileId: string; isDefault: boolean; sortOrder: number }>;
+  subtitleTracks: Array<{ language: string; label: string; driveFileId: string; isDefault: boolean; isForced: boolean }>;
+}
+
+/**
+ * Audio and subtitle files, from whatever video was inspected.
+ *
+ * Shared by both kinds of job, because the work is identical: the question
+ * "what languages are in this file, and how do I make them playable" does not
+ * depend on where the file came from. Nothing here touches the video stream.
+ */
+async function buildTracks(
+  job: Job,
+  summary: MasterSummary,
+  sourcePath: string,
+  jobDir: string,
+  base: string,
+  drive: Drive,
+  renditions: string,
+): Promise<BuiltTracks> {
+  // --- audio ----------------------------------------------------------------
+  const knownAudio = new Map(job.audioTracks.filter((a) => a.driveFileId).map((a) => [a.language, a.driveFileId!]));
+  const audioTracks: BuiltTracks['audioTracks'] = [];
+
+  if (summary.audio.length > 1) {
+    await progress(job.id, 'DETECTING_AUDIO', `${summary.audio.length} tracks`);
+    for (const [position, stream] of summary.audio.entries()) {
+      if (stopping) throw new Error('Stopped before this audio track was built');
+      const key = stream.language ?? `track${position + 1}`;
+      const name = `${base}-${key}.m4a`;
+      const already = knownAudio.get(key) ?? (await existingUpload(drive, renditions, name));
+      if (already) {
+        step(`audio ${position + 1}`, `${stream.label} (reused)`);
+        audioTracks.push({ language: key, label: stream.label, driveFileId: already, isDefault: stream.isDefault, sortOrder: position });
+        continue;
+      }
+      await progress(job.id, 'EXTRACTING_AUDIO', `${stream.label} (${position + 1} of ${summary.audio.length})`);
+      const out = path.join(jobDir, name);
+      const copied = !audioNeedsConversion(stream.codec);
+      await extractAudio(sourcePath, stream.index, out, copied);
+      const id = await upload(drive, renditions, out, name);
+      step(`audio ${position + 1}`, `${stream.label} ${MB(fs.statSync(out).size)} MB${copied ? ' (copied)' : ' (converted)'}`);
+      await fsp.rm(out, { force: true });
+      audioTracks.push({ language: key, label: stream.label, driveFileId: id, isDefault: stream.isDefault, sortOrder: position });
+    }
+    if (!audioTracks.some((t) => t.isDefault) && audioTracks[0]) audioTracks[0].isDefault = true;
+  } else {
+    // One stream plays from the video itself, so a separate file would only
+    // duplicate it and give the player a pointless language menu.
+    step('audio', summary.audio.length === 1 ? 'single track, plays from the video itself' : 'none in the source');
+  }
+
+  // --- subtitles ------------------------------------------------------------
+  const knownSubs = new Map(job.subtitleTracks.filter((s) => s.driveFileId).map((s) => [s.language, s.driveFileId!]));
+  const subtitleTracks: BuiltTracks['subtitleTracks'] = [];
+  const skipped: string[] = [];
+
+  if (summary.subtitles.length > 0) await progress(job.id, 'DETECTING_SUBTITLES', `${summary.subtitles.length} found`);
+  for (const [position, stream] of summary.subtitles.entries()) {
+    if (!stream.isTextBased) {
+      // A bitmap subtitle would need OCR. Reported, never silently dropped and
+      // never registered as if it were available.
+      skipped.push(`${stream.label} (${stream.codec} is a bitmap format and needs OCR)`);
+      continue;
+    }
+    if (stopping) throw new Error('Stopped before this subtitle was built');
+    const key = stream.language ?? `sub${position + 1}`;
+    const name = `${base}-${key}.vtt`;
+    const already = knownSubs.get(key) ?? (await existingUpload(drive, renditions, name));
+    if (already) {
+      step(`subtitle ${position + 1}`, `${stream.label} (reused)`);
+      subtitleTracks.push({ language: key, label: stream.label, driveFileId: already, isDefault: stream.isDefault, isForced: stream.isForced });
+      continue;
+    }
+    await progress(job.id, 'CONVERTING_SUBTITLES', stream.label);
+    const out = path.join(jobDir, name);
+    await extractSubtitle(sourcePath, stream.index, out);
+    const id = await upload(drive, renditions, out, name);
+    step(`subtitle ${position + 1}`, `${stream.label} ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
+    await fsp.rm(out, { force: true });
+    subtitleTracks.push({ language: key, label: stream.label, driveFileId: id, isDefault: stream.isDefault, isForced: stream.isForced });
+  }
+  if (summary.subtitles.length === 0) step('subtitles', 'none in the source (hardsubbed or absent)');
+  for (const note of skipped) step('subtitle', `skipped: ${note}`);
+
+  return { audioTracks, subtitleTracks };
+}
+
 // --- one job ----------------------------------------------------------------
 
 async function processJob(job: Job): Promise<void> {
-  log(`\n${describe(job)}`);
+  log('');
+  log(describe(job));
   currentJobLabel = describe(job);
   const base = baseName(job);
   const jobDir = path.join(WORK_DIR, job.id);
   await fsp.mkdir(jobDir, { recursive: true });
 
+  // A master means transcode a ladder, the way episodes used to be made.
+  // Otherwise the admin supplied the qualities and only the tracks are ours.
+  const isMasterJob = Boolean(job.masterDriveFileId);
+
   try {
     const free = await freeSpace(jobDir);
-    if (free < MIN_FREE_BYTES) {
+    const needed = isMasterJob ? MIN_FREE_BYTES : MIN_FREE_BYTES_TRACKS;
+    if (free < needed) {
       throw new Error(
-        `Only ${MB(free)} MB free on the work volume; ${MB(MIN_FREE_BYTES)} MB required. ` +
+        `Only ${MB(free)} MB free on the work volume; ${MB(needed)} MB required. ` +
           `Free space or lower MIN_FREE_DISK_BYTES.`,
       );
     }
 
-    await progress(job.id, 'DOWNLOADING');
-    const masterPath = path.join(jobDir, 'master');
-    await downloadMaster(job.masterDriveFileId, masterPath);
+    // Which file to read. Only ever one: the qualities of an episode are the
+    // same content, so probing all of them would cost four downloads to learn
+    // the same thing.
+    let sourceFileId: string;
+    let sourceDescription: string;
+    if (isMasterJob) {
+      sourceFileId = job.masterDriveFileId!;
+      sourceDescription = 'master';
+    } else {
+      const picked = pickTrackSource(job.variants, job.trackSourceQuality);
+      if (!picked?.driveFileId) {
+        throw new Error(
+          'No uploaded quality to read tracks from. Add at least one video file, or turn off automatic tracks.',
+        );
+      }
+      sourceFileId = picked.driveFileId;
+      sourceDescription = qualityLabel(picked.quality);
+      step('track source', `${sourceDescription}${job.trackSourceQuality ? ' (chosen)' : ' (highest available)'}`);
+    }
+
+    await progress(job.id, 'DOWNLOADING_SOURCE', sourceDescription);
+    const sourcePath = path.join(jobDir, 'source');
+    await downloadDriveFile(sourceFileId, sourcePath);
 
     await progress(job.id, 'PROBING');
-    const summary = await probeMaster(masterPath);
-    if (!summary.video) throw new Error('The master has no video stream');
+    const summary = await probeMedia(sourcePath);
     step(
       'probe',
-      `${summary.video.codec} ${summary.video.width}x${summary.video.height} ${summary.video.pixFmt}, ` +
+      `${summary.video ? `${summary.video.codec} ${summary.video.width}x${summary.video.height} ${summary.video.pixFmt}, ` : ''}` +
         `${summary.audio.length} audio, ${summary.subtitles.length} subtitle`,
     );
-
-    const ladder = planLadder(summary.video.height);
-    if (ladder.length === 0) throw new Error(`Unusable source height ${summary.video.height}`);
 
     const drive = uploadClient();
     const renditions = await folderId(drive, CACHE_FOLDER_NAME);
 
     // --- video --------------------------------------------------------------
-    const known = new Map(job.variants.filter((v) => v.driveFileId).map((v) => [v.quality, v.driveFileId!]));
-    const variants: Array<{ quality: string; driveFileId: string }> = [];
+    // For a track job this is the whole of the video handling: nothing. The
+    // files the admin uploaded are already the playable variants, and
+    // re-encoding them would cost hours to produce something worse.
+    const variants = isMasterJob
+      ? await buildLadder(job, summary, sourcePath, jobDir, base, drive, renditions)
+      : [];
+    if (!isMasterJob) step('video', 'untouched — the uploaded qualities are the variants');
 
-    for (const rung of ladder) {
-      if (stopping) throw new Error('Stopped before this rendition was built');
-      const already = known.get(rung.quality);
-      if (already) {
-        step(`${rung.height}p`, 'reused');
-        variants.push({ quality: rung.quality, driveFileId: already });
-        continue;
-      }
-
-      const name = `${base}-${rung.height}p.mp4`;
-      const adopted = await existingUpload(drive, renditions, name);
-      if (adopted) {
-        step(`${rung.height}p`, 'adopted an earlier upload');
-        variants.push({ quality: rung.quality, driveFileId: adopted });
-        continue;
-      }
-
-      await progress(job.id, `ENCODING_${rung.height}P`, `${variants.length + 1} of ${ladder.length}`);
-      const out = path.join(jobDir, name);
-      await encodeVideo(masterPath, rung.height, rung.kbps, out);
-      await progress(job.id, 'UPLOADING', `${rung.height}p`);
-      const id = await upload(drive, renditions, out, name);
-      step(`${rung.height}p`, `built ${MB(fs.statSync(out).size)} MB`);
-      await fsp.rm(out, { force: true });
-      variants.push({ quality: rung.quality, driveFileId: id });
-    }
-
-    // --- audio --------------------------------------------------------------
-    const knownAudio = new Map(job.audioTracks.filter((a) => a.driveFileId).map((a) => [a.language, a.driveFileId!]));
-    const audioTracks: Array<{ language: string; label: string; driveFileId: string; isDefault: boolean; sortOrder: number }> = [];
-
-    if (summary.audio.length > 1) {
-      await progress(job.id, 'EXTRACTING_AUDIO', `${summary.audio.length} tracks`);
-      for (const [position, stream] of summary.audio.entries()) {
-        if (stopping) throw new Error('Stopped before this audio track was built');
-        const key = stream.language ?? `track${position + 1}`;
-        const name = `${base}-${key}.m4a`;
-        const already = knownAudio.get(key) ?? (await existingUpload(drive, renditions, name));
-        if (already) {
-          step(`audio ${position + 1}`, `${stream.label} (reused)`);
-          audioTracks.push({ language: key, label: stream.label, driveFileId: already, isDefault: stream.isDefault, sortOrder: position });
-          continue;
-        }
-        const out = path.join(jobDir, name);
-        await encodeAudio(masterPath, stream.index, out);
-        const id = await upload(drive, renditions, out, name);
-        step(`audio ${position + 1}`, `${stream.label} ${MB(fs.statSync(out).size)} MB`);
-        await fsp.rm(out, { force: true });
-        audioTracks.push({ language: key, label: stream.label, driveFileId: id, isDefault: stream.isDefault, sortOrder: position });
-      }
-      if (!audioTracks.some((t) => t.isDefault) && audioTracks[0]) audioTracks[0].isDefault = true;
-    } else {
-      step('audio', summary.audio.length === 1 ? 'single track, muxed into the video' : 'none in the master');
-    }
-
-    // --- subtitles ----------------------------------------------------------
-    const knownSubs = new Map(job.subtitleTracks.filter((s) => s.driveFileId).map((s) => [s.language, s.driveFileId!]));
-    const subtitleTracks: Array<{ language: string; label: string; driveFileId: string; isDefault: boolean; isForced: boolean }> = [];
-    const skipped: string[] = [];
-
-    if (summary.subtitles.length > 0) await progress(job.id, 'CONVERTING_SUBTITLES');
-    for (const [position, stream] of summary.subtitles.entries()) {
-      if (!stream.isTextBased) {
-        // A bitmap subtitle would need OCR. Reported, never silently dropped.
-        skipped.push(`${stream.label} (${stream.codec} is a bitmap format and needs OCR)`);
-        continue;
-      }
-      if (stopping) throw new Error('Stopped before this subtitle was built');
-      const key = stream.language ?? `sub${position + 1}`;
-      const name = `${base}-${key}.vtt`;
-      const already = knownSubs.get(key) ?? (await existingUpload(drive, renditions, name));
-      if (already) {
-        step(`subtitle ${position + 1}`, `${stream.label} (reused)`);
-        subtitleTracks.push({ language: key, label: stream.label, driveFileId: already, isDefault: stream.isDefault, isForced: stream.isForced });
-        continue;
-      }
-      const out = path.join(jobDir, name);
-      await encodeSubtitle(masterPath, stream.index, out);
-      const id = await upload(drive, renditions, out, name);
-      step(`subtitle ${position + 1}`, `${stream.label} ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
-      await fsp.rm(out, { force: true });
-      subtitleTracks.push({ language: key, label: stream.label, driveFileId: id, isDefault: stream.isDefault, isForced: stream.isForced });
-    }
-    if (summary.subtitles.length === 0) step('subtitles', 'none in the master (hardsubbed or absent)');
-    for (const note of skipped) step('subtitle', `skipped: ${note}`);
+    const { audioTracks, subtitleTracks } = await buildTracks(job, summary, sourcePath, jobDir, base, drive, renditions);
 
     // --- register -----------------------------------------------------------
     await progress(job.id, 'REGISTERING');
-    await api(`/media-worker/jobs/${job.id}/media`, { body: { variants, audioTracks, subtitleTracks } });
-    step('register', `${variants.length} quality, ${audioTracks.length} audio, ${subtitleTracks.length} subtitle`);
+    await api(`/media-worker/jobs/${job.id}/media`, {
+      body: {
+        variants,
+        audioTracks,
+        subtitleTracks,
+        ...(isMasterJob ? {} : { trackSourceFileId: sourceFileId }),
+      },
+    });
+    step(
+      'register',
+      isMasterJob
+        ? `${variants.length} quality, ${audioTracks.length} audio, ${subtitleTracks.length} subtitle`
+        : `${audioTracks.length} audio, ${subtitleTracks.length} subtitle from ${sourceDescription}`,
+    );
 
     await api(`/media-worker/jobs/${job.id}/complete`, { body: { ready: true } });
     step('state', 'READY');
@@ -632,11 +759,11 @@ async function preflight(): Promise<void> {
     if (!res.ok) throw new Error(`the queue returned ${res.status}`);
     return 'accepted';
   });
-  await check('Drive (read masters)', async () => {
-    await masterClient().files.list({ pageSize: 1, fields: 'files(id)' });
-    return 'can read';
+  await check('Drive (read video)', async () => {
+    await readClient().files.list({ pageSize: 1, fields: 'files(id)' });
+    return serviceAccountCredentials() ? 'can read (service account)' : 'can read';
   });
-  await check('Drive (write renditions)', async () => {
+  await check('Drive (write tracks)', async () => {
     const drive = uploadClient();
     await folderId(drive, CACHE_FOLDER_NAME);
     return `can write to “${CACHE_FOLDER_NAME}”`;
@@ -644,8 +771,8 @@ async function preflight(): Promise<void> {
   await check('Work directory', async () => {
     await fsp.mkdir(WORK_DIR, { recursive: true });
     const free = await freeSpace(WORK_DIR);
-    if (free < MIN_FREE_BYTES) {
-      throw new Error(`only ${MB(free)} MB free; ${MB(MIN_FREE_BYTES)} MB needed for a 1080p master`);
+    if (free < MIN_FREE_BYTES_TRACKS) {
+      throw new Error(`only ${MB(free)} MB free; ${MB(MIN_FREE_BYTES_TRACKS)} MB needed to process a track source`);
     }
     return `${WORK_DIR} (${MB(free)} MB free)`;
   });

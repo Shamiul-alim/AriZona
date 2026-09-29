@@ -210,13 +210,15 @@ are genuinely verifiable before you have real content.
 
 Episodes can be added two ways.
 
-**MANUAL_VARIANTS** — you supply one file per quality and per track. Nothing
-runs in the background.
+**Manual qualities + auto tracks** (the normal one) — you supply one file per
+quality, by upload or Drive link. A separate worker then reads one of those
+files and registers the audio languages and subtitles it finds. Your video is
+never re-encoded, and the episode is playable the moment you save.
 
-**SINGLE_MASTER** — you upload one master video (or paste a Drive link to one)
-and a separate worker builds the quality ladder, one file per embedded audio
-stream, and a WebVTT file per embedded text subtitle. The admin does nothing
-else per episode.
+**Auto master (legacy)** — one master file transcoded into a whole quality
+ladder. Kept so episodes made this way keep working; not recommended for new
+ones, because it costs tens of minutes of CPU per episode to produce files
+usually worse than ones you prepared yourself.
 
 The worker is a container with its own FFmpeg, so it does not depend on what is
 installed on any particular machine:

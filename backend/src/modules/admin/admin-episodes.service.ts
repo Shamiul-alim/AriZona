@@ -191,11 +191,25 @@ export class AdminEpisodesService {
             );
           }
 
+          // Two things can make this source a job, and they are different
+          // work. A master means transcode a quality ladder (the legacy way).
+          // autoTracks means read the audio and subtitle streams out of a file
+          // the admin supplied, and never touch the video at all.
+          //
+          // autoTracks is only worth queueing when there is something to read,
+          // so a source saved before any quality is attached stays idle rather
+          // than failing repeatedly.
+          const autoTracks = source.autoTracks === true;
+          const hasVariants = Boolean(source.variants?.length);
+          const queued = Boolean(masterDriveFileId) || (autoTracks && hasVariants);
+
           const created = await tx.mediaSource.create({
             data: {
               episodeId,
               masterDriveFileId,
-              processingState: masterDriveFileId
+              autoTracks,
+              trackSourceQuality: source.trackSourceQuality ?? null,
+              processingState: queued
                 ? MediaProcessingState.PENDING
                 : MediaProcessingState.NOT_APPLICABLE,
               label: source.label,

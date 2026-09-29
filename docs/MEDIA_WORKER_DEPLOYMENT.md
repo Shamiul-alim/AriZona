@@ -1,14 +1,17 @@
 # Media worker — deployment and operation
 
-The media worker turns one uploaded master video into everything the player
-needs: a quality ladder, one playable file per embedded audio stream, and a
-WebVTT file per embedded text subtitle.
+The media worker reads one of your video files and prepares the audio and
+subtitle tracks the player needs: one playable file per embedded audio stream,
+and a WebVTT file per embedded text subtitle.
 
-It exists as a separate service because transcoding is CPU-bound and runs for
-tens of minutes. It cannot live in the API's request path — it would block the
-API and exceed the request timeout of every host worth using.
+**It does not touch your video.** You supply each quality yourself and those
+files are what viewers play, byte for byte.
 
-**Normal admin usage is: upload one master and save.** Everything below is
+It exists as a separate service because FFmpeg cannot live in the API's request
+path — reading a 2 GB file takes minutes, which would block the API and exceed
+the request timeout of every host worth using.
+
+**Normal admin usage is: supply the qualities and save.** Everything below is
 one-time deployment setup.
 
 ---
@@ -16,21 +19,24 @@ one-time deployment setup.
 ## What the admin does, per episode
 
 1. Admin → Anime → Season → Episode
-2. Media mode → **SINGLE_MASTER**
-3. Master source → **Upload file** (or paste an existing Drive link)
+2. Media mode → **Manual qualities + auto tracks**
+3. For each quality you have — 1080p, 720p, 480p, 360p — **Upload** a file or
+   paste a **Drive link**
 4. Save
 
-That is all. The episode becomes `PENDING`, a running worker claims it within
-one poll interval, and the episode reaches `READY` on its own. Progress is
-visible on the episode page.
+That is all. The episode is playable the moment it saves. Detection of audio
+and subtitles happens on its own: the source becomes `PENDING`, a running
+worker claims it, and it reaches `READY` without anyone doing anything.
+
+Nothing about the audio or subtitles is typed by hand.
 
 ---
 
 ## Architecture
 
 ```
-Browser ──upload──> API ──stream──> Google Drive (masters/)
-                     │
+Browser ──upload──> API ──stream──> Google Drive
+                     │              (your quality files, untouched)
                      │ creates a PENDING job on the MediaSource
                      ▼
                   Database
@@ -39,18 +45,52 @@ Browser ──upload──> API ──stream──> Google Drive (masters/)
                      │
               Media worker (container)
                      │
-                     ├─ ffprobe the master
-                     ├─ encode the ladder      ─┐
-                     ├─ extract each audio      ├─> Google Drive (_renditions/)
-                     └─ convert each subtitle  ─┘
+                     ├─ read ONE quality (the highest by default)
+                     ├─ ffprobe it
+                     ├─ extract each audio stream  ─┐
+                     └─ convert each text subtitle ─┴─> Google Drive (_renditions/)
 ```
 
-A master is a job: a `MediaSource` row with `masterDriveFileId` set and a
-`processingState`. There is no separate queue table, so what should play and
-what still needs building can never disagree.
+The job is a `MediaSource` row with `autoTracks` set and a `processingState`.
+There is no separate queue table, so what should play and what still needs
+building can never disagree.
 
-Uploading and pasting a Drive link converge on the same field, so both feed one
+Only **one** file is ever read. The qualities of an episode are the same
+content, so probing all four would cost four downloads to learn the same thing.
+Which one is chosen, and how to override it, is under *Track source* below.
+
+Uploading and pasting a Drive link set the same field, so both feed one
 pipeline.
+
+---
+
+## Track source
+
+By default the worker reads the **highest quality available**: 1080p if there is
+one, otherwise 720p, and so on. That file is most likely to carry the full set
+of streams.
+
+Two qualities of one episode do not always carry the same streams — a 1080p
+remux may have three languages where the 480p has one. Only the file actually
+read decides what the player offers, so the admin panel states which one it was:
+
+> Tracks from: 1080p
+
+If you know a particular file is the complete one, set **Track source** to that
+quality instead of Auto. A preference that is not present falls back to Auto
+rather than failing.
+
+---
+
+## Legacy: auto master
+
+Episodes made before this existed used one master file transcoded into a
+quality ladder. That path still works, is still selectable as **Auto master
+(legacy)**, and existing episodes made with it keep playing untouched.
+
+It is not the recommended workflow: it takes tens of minutes of full-tilt CPU
+per episode to produce files that are usually worse than ones you prepared
+yourself. Use it only if you have a master and no qualities.
 
 ---
 
@@ -69,18 +109,33 @@ Uploads are owned by the OAuth account, not the service account: a service
 account has no Drive storage quota of its own, so anything it creates has
 nowhere to live.
 
+### Why only one Drive credential
+
+A service account **cannot write**. It has no Drive storage quota, so a file it
+creates has nowhere to live — including in a folder shared with it. The OAuth
+credential is therefore required no matter what.
+
+That same OAuth credential **can read**: it owns the files the admin uploaded,
+and it can read anything shared by link. So the service account is not needed
+and the worker asks for three secrets instead of four.
+
+It is still accepted. When configured, reads use it instead, which is the
+narrower authority — read-only rather than full account access. That is a small
+gain, since the worker must hold the OAuth token anyway to write, so using it to
+read as well grants nothing it did not already have. Configure it if you were
+given one; skip it otherwise.
+
 ### Worker
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `API_URL` | yes | — | e.g. `https://api.example.com/api` |
 | `MEDIA_WORKER_TOKEN` | yes | — | Must match the API's. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | one of | — | Raw service-account JSON. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | these | — | Same, base64 — easiest for most secret stores. |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | three | — | Path, for hosts that mount secrets as files. |
-| `GOOGLE_DRIVE_CLIENT_ID` | yes | — | Uploading generated media. |
+| `GOOGLE_DRIVE_CLIENT_ID` | yes | — | Reading your video, and saving the tracks. |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | yes | — | — |
 | `GOOGLE_DRIVE_REFRESH_TOKEN` | yes | — | — |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | no | — | Optional. See *Why only one Drive credential* below. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` / `_FILE` | no | — | Same thing, raw or as a file path. |
 | `WORK_DIR` | no | `/var/tmp/anizora-media` | Scratch space. Put it on a real disk. |
 | `MEDIA_WORKER_CONCURRENCY` | no | `1` | See *Resource limits*. |
 | `MIN_FREE_DISK_BYTES` | no | `12884901888` (12 GB) | A job is refused below this. |
@@ -146,23 +201,35 @@ against a build older than 2020, which cannot decode 10-bit HEVC correctly.
 
 ## Resources
 
+Reading tracks is a fraction of the work transcoding was. Nothing is re-encoded
+unless an audio stream is in a format the player cannot take, and even then it
+is audio only — a few megabytes, not a few gigabytes.
+
 | | |
 | --- | --- |
-| CPU | 2 cores is a sensible floor. FFmpeg uses everything it is given. |
-| RAM | 2 GB. Transcoding is CPU- and disk-bound, not memory-hungry. |
-| Disk | The master plus its renditions, several times over: **12 GB free** is the default floor. A 400 MB 1080p master produces roughly 525 MB of renditions and needs both on disk at once. |
-| Time | Roughly 1.5–2× realtime per rendition at `veryfast`. A 24-minute episode takes ~35–50 minutes for four qualities on 2 cores. |
+| CPU | 2 cores is comfortable. 1 works. The job is dominated by downloading, not computing. |
+| RAM | 1–2 GB. FFmpeg streams; it does not hold the file. |
+| Disk | **3 GB free** is the default floor — room for one video file plus the small track files beside it. Raise it if your masters are unusually large. |
+| Time | Minutes, mostly spent downloading the source. See *Measured* below. |
 
-**Concurrency defaults to 1 deliberately.** FFmpeg already parallelises across
-cores, so running several jobs at once makes them all slower and multiplies disk
-use. Raise `MEDIA_WORKER_CONCURRENCY` only where CPU and disk genuinely allow.
+`MIN_FREE_DISK_TRACKS_BYTES` sets that floor. The old 12 GB figure
+(`MIN_FREE_DISK_BYTES`) still applies to a legacy transcoding job, which really
+does need room for a master and a whole ladder at once.
+
+**Concurrency stays at 1.** There is less reason to raise it now: the bottleneck
+is the network, and two downloads at once help nobody.
 
 ---
 
 ## Queue behaviour
 
-States: `NOT_APPLICABLE` (manual variants) → `PENDING` → `PROCESSING` →
-`READY` | `FAILED`.
+States: `NOT_APPLICABLE` → `PENDING` → `PROCESSING` → `READY` | `FAILED`.
+
+**This describes the tracks, not the video.** The qualities you supplied are
+playable from the moment you save, whatever the state says. A `FAILED` track
+scan means the audio or subtitles could not be prepared — the episode still
+plays, and the admin panel says exactly that rather than calling the episode
+broken.
 
 - **Claiming** is atomic. Several workers can poll the same queue safely; the
   loser skips the job.
@@ -191,35 +258,46 @@ Temporary files are removed when a job ends, successfully or not.
 ## Storage layout
 
 ```
-AniZora masters/          masters, never evicted
-AniZora _renditions/      generated media, LRU-evicted against MAX_CACHE_BYTES
-    <slug>-e<N>-1080p.mp4
-    <slug>-e<N>-720p.mp4
-    <slug>-e<N>-<lang>.m4a
-    <slug>-e<N>-<lang>.vtt
+AniZora masters/          your uploaded video files, never evicted
+AniZora _renditions/      generated tracks, LRU-evicted against MAX_CACHE_BYTES
+    <slug>-e<N>-<lang>.m4a      extracted audio
+    <slug>-e<N>-<lang>.vtt      converted subtitles
+    <slug>-e<N>-720p.mp4        legacy master jobs only
 ```
 
-Only the rendition folder is ever evicted from, and only generated files.
-Masters are the source of truth for rebuilding and are never touched.
+Only the rendition folder is ever evicted from, and only generated files. Your
+own video files are never touched: they are what viewers play, and everything
+else can be rebuilt from them.
 
 ---
 
 ## What gets produced
 
-**Video** — never upscaled: a 1080p master yields 1080/720/480/360, a 720p
-master 720/480/360. All renditions are H.264 8-bit, because the master may be
-HEVC or 10-bit, which most browsers cannot play — so even a same-height
-rendition is re-encoded rather than copied.
+**Video — nothing.** Your quality files are the variants. They are never
+re-encoded, re-muxed, scaled or copied. The worker reads one of them and writes
+nothing back to it.
+
+This is enforced rather than intended: the FFmpeg arguments for track work are
+built in one place and a test asserts they carry `-vn` and no video encoder
+flag. The only code that can encode video is the legacy master path, and a
+track job cannot reach it.
 
 **Audio** — every embedded stream becomes a separate playable file when there is
 more than one, labelled from its language tag (`jpn` → Japanese). Untagged
-streams become `Audio 1`, `Audio 2`; no language is ever invented. A single
-audio stream stays muxed in the video.
+streams become `Audio 1`, `Audio 2`; no language is ever invented.
+
+An AAC stream is **copied out bit for bit** — no quality loss, seconds rather
+than minutes. Anything else (AC3, DTS, FLAC, Opus…) is converted to AAC, which
+is what the player can take. Audio only, never the video.
+
+A **single** audio stream produces no separate file at all: it plays from the
+video itself, and the player shows no language menu it does not need.
 
 **Subtitles** — text streams (SubRip, ASS/SSA, mov_text) are converted to
 WebVTT. Bitmap subtitles (PGS, VobSub) are **detected and reported as skipped**,
 never silently dropped and never faked — they would need OCR, which this
-pipeline does not do.
+pipeline does not do. A hardsubbed video yields no subtitle track, and the
+player correctly offers none.
 
 ---
 

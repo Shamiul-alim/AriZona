@@ -99,10 +99,15 @@ if [ "$KEEP_CONFIG" != 1 ]; then
 
   echo
   grey "  Google Drive credentials (from whoever handed over the project)."
-  SA_B64="$(read_secret 'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64')"
+  grey "  These three let the worker read your video and save the tracks it finds."
   CLIENT_ID="$(read_secret 'GOOGLE_DRIVE_CLIENT_ID')"
   CLIENT_SECRET="$(read_secret 'GOOGLE_DRIVE_CLIENT_SECRET')"
   REFRESH_TOKEN="$(read_secret 'GOOGLE_DRIVE_REFRESH_TOKEN')"
+
+  echo
+  grey "  Optional: a service-account key, if you were given one. It only narrows"
+  grey "  reading to read-only; the worker works fine without it. Enter to skip."
+  SA_B64="$(read_secret 'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (optional)' optional)"
 
   # Created with no permissions, then written: the credentials are never
   # briefly world-readable on a shared machine.
@@ -112,10 +117,10 @@ if [ "$KEEP_CONFIG" != 1 ]; then
     echo "# Written by install-worker.sh. Holds live credentials - do not share."
     echo "API_URL=$API_URL"
     echo "MEDIA_WORKER_TOKEN=$TOKEN"
-    echo "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$SA_B64"
     echo "GOOGLE_DRIVE_CLIENT_ID=$CLIENT_ID"
     echo "GOOGLE_DRIVE_CLIENT_SECRET=$CLIENT_SECRET"
     echo "GOOGLE_DRIVE_REFRESH_TOKEN=$REFRESH_TOKEN"
+    echo "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$SA_B64"
     echo "MEDIA_WORKER_CONCURRENCY=1"
   } >> "$ENV_FILE"
   chmod 600 "$ENV_FILE"
@@ -129,6 +134,7 @@ fi
 echo
 echo "3. Building the worker image"
 grey "  First run downloads the source and FFmpeg. This takes a few minutes."
+grey "  After that the worker only reads your videos - it never re-encodes them."
 
 if ! dc build; then
   red "  [fail] The image could not be built. The output above says why."

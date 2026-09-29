@@ -7,6 +7,7 @@ import { authFetch } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import { MediaProcessingStatus } from './MediaProcessingStatus';
 import { MasterSourceField } from './MasterSourceField';
+import { UploadButton } from './VideoUpload';
 import { AdminHeader, Banner, Button, Card, Label, adminInput, adminSelect, adminTextarea } from './ui';
 import { ImageUploadField } from './ImageUploadField';
 
@@ -54,6 +55,13 @@ interface SourceDraft {
    */
   mediaMode: MediaMode;
   masterDriveFileIdOrUrl: string;
+  /**
+   * Read the audio and subtitle streams out of one of the supplied qualities.
+   * The video is never touched — the files the admin uploads are the variants.
+   */
+  autoTracks: boolean;
+  /** Which quality to read them from. Empty means the highest available. */
+  trackSourceQuality: string;
   variants: VariantDraft[];
 }
 
@@ -134,6 +142,8 @@ function newSource(index: number): SourceDraft {
     embedUrl: '',
     isDefault: index === 0,
     mediaMode: 'MANUAL_VARIANTS',
+    autoTracks: true,
+    trackSourceQuality: '',
     masterDriveFileIdOrUrl: '',
     variants: [{ quality: 'Q_1080P', driveFileIdOrUrl: '', directUrl: '', isDefault: false }],
   };
@@ -239,6 +249,10 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                 isDefault: Boolean(source.isDefault),
                 // A stored master means the worker built this source.
                 mediaMode: source.masterDriveFileId ? 'SINGLE_MASTER' : 'MANUAL_VARIANTS',
+                // Off for anything saved before this existed, so a source with
+                // hand-entered tracks is never quietly rewritten by a worker.
+                autoTracks: Boolean(source.autoTracks ?? false),
+                trackSourceQuality: String(source.trackSourceQuality ?? ''),
                 masterDriveFileIdOrUrl: String(source.masterDriveFileId ?? ''),
                 variants: ((source.variants as Array<Record<string, unknown>>) ?? []).map((v) => ({
                   quality: String(v.quality ?? 'Q_720P'),
@@ -355,6 +369,13 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
         isDefault: source.isDefault,
         masterDriveFileIdOrUrl:
           source.mediaMode === 'SINGLE_MASTER' ? source.masterDriveFileIdOrUrl.trim() : undefined,
+        // Track detection belongs to the manual path. A master already yields
+        // its own tracks as part of being processed.
+        autoTracks: source.mediaMode === 'MANUAL_VARIANTS' ? source.autoTracks : undefined,
+        trackSourceQuality:
+          source.mediaMode === 'MANUAL_VARIANTS' && source.trackSourceQuality
+            ? source.trackSourceQuality
+            : undefined,
         // With a master the worker owns the renditions; sending hand-typed ones
         // would fight it. Without one this is the unchanged manual path.
         variants: source.mediaMode === 'SINGLE_MASTER'
@@ -721,14 +742,22 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                         steps, so the mode can be picked before any URL exists. */}
                     {providerMeta?.needsVariants ? (
                       <div className="mt-3 rounded-lg border border-line-soft bg-base/50 p-3">
-                        <Label hint="One master file, or one file per quality that you supply yourself.">
+                        <Label hint="You supply the video qualities. Audio and subtitles are found for you.">
                           Media mode
                         </Label>
                         <div className="mt-1.5 flex flex-wrap gap-2">
                           {(
                             [
-                              { key: 'SINGLE_MASTER', label: 'SINGLE_MASTER', hint: 'One master, processed automatically' },
-                              { key: 'MANUAL_VARIANTS', label: 'MANUAL_VARIANTS', hint: 'You supply each quality' },
+                              {
+                                key: 'MANUAL_VARIANTS',
+                                label: 'Manual qualities + auto tracks',
+                                hint: 'You supply each quality; audio and subtitles are detected',
+                              },
+                              {
+                                key: 'SINGLE_MASTER',
+                                label: 'Auto master (legacy)',
+                                hint: 'One file, transcoded into every quality — slow',
+                              },
                             ] as const
                           ).map((mode) => {
                             const active = source.mediaMode === mode.key;
@@ -753,12 +782,63 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                         </div>
 
                         {source.mediaMode === 'SINGLE_MASTER' ? (
-                          <MasterSourceField
-                            value={source.masterDriveFileIdOrUrl}
-                            episodeId={episodeId}
-                            onChange={(master) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: master })}
-                          />
-                        ) : null}
+                          <>
+                            <p className="mt-2 rounded-lg bg-warn/10 px-3 py-2 text-[11.5px] leading-relaxed text-warn">
+                              This transcodes one file into every quality, which takes tens of minutes per episode.
+                              Kept so episodes made this way keep working. For anything new, supply the qualities
+                              yourself and let the worker find only the audio and subtitles.
+                            </p>
+                            <MasterSourceField
+                              value={source.masterDriveFileIdOrUrl}
+                              episodeId={episodeId}
+                              onChange={(master) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: master })}
+                            />
+                          </>
+                        ) : (
+                          <div className="mt-3 border-t border-line-soft pt-3">
+                            <label className="flex cursor-pointer items-start gap-2">
+                              <input
+                                type="checkbox"
+                                checked={source.autoTracks}
+                                onChange={(e) => updateSource(sourceIndex, { autoTracks: e.target.checked })}
+                                className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-brand)]"
+                              />
+                              <span>
+                                <span className="block text-[12.5px] font-semibold text-ink">
+                                  Find audio and subtitles automatically
+                                </span>
+                                <span className="block text-[11.5px] leading-relaxed text-ink-faint">
+                                  Reads the streams out of one of your files and adds them to the player. Your video
+                                  is never re-encoded.
+                                </span>
+                              </span>
+                            </label>
+
+                            {source.autoTracks ? (
+                              <label className="mt-3 block max-w-64">
+                                <Label hint="Leave on Auto unless one particular file has the full set of streams.">
+                                  Track source
+                                </Label>
+                                <select
+                                  value={source.trackSourceQuality}
+                                  onChange={(e) =>
+                                    updateSource(sourceIndex, { trackSourceQuality: e.target.value })
+                                  }
+                                  className={adminSelect}
+                                >
+                                  <option value="">Auto — highest available</option>
+                                  {source.variants
+                                    .filter((v) => v.driveFileIdOrUrl.trim() || v.directUrl.trim())
+                                    .map((v) => (
+                                      <option key={v.quality} value={v.quality}>
+                                        {QUALITY_LABELS[v.quality] ?? v.quality}
+                                      </option>
+                                    ))}
+                                </select>
+                              </label>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     ) : null}
 
@@ -816,6 +896,19 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                                 aria-label="Source location"
                                 className={`${adminInput} min-w-48 flex-1`}
                               />
+
+                              {/* Upload or paste a link — both land in the same
+                                  field, so one quality can be uploaded and
+                                  another linked without the two paths diverging. */}
+                              {isDrive ? (
+                                <UploadButton
+                                  episodeId={episodeId}
+                                  suffix={(QUALITY_LABELS[variant.quality] ?? variant.quality).toLowerCase()}
+                                  onUploaded={(driveFileId) =>
+                                    updateVariant(sourceIndex, variantIndex, { driveFileIdOrUrl: driveFileId })
+                                  }
+                                />
+                              ) : null}
 
                               <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-muted">
                                 <input

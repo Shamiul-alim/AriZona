@@ -5,6 +5,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 /** What a worker reports having produced. Mirrors RegisterMediaDto. */
 export interface RegisterProducedMedia {
   variants: Array<{ quality: VideoQuality; driveFileId: string }>;
+  /** The file the tracks were read from. Track jobs send it; master jobs do not. */
+  trackSourceFileId?: string;
   audioTracks?: Array<{ language: string; label: string; driveFileId: string; isDefault?: boolean; sortOrder?: number }>;
   subtitleTracks?: Array<{ language: string; label: string; driveFileId: string; isDefault?: boolean; isForced?: boolean }>;
 }
@@ -40,11 +42,14 @@ export class AdminMediaJobsService {
 
     const rows = await this.prisma.mediaSource.findMany({
       where: {
-        masterDriveFileId: { not: null },
+        // Two kinds of job. A master is the legacy transcoding one. autoTracks
+        // is the normal one now: the admin supplied the qualities and only the
+        // audio and subtitles need finding.
+        OR: [{ masterDriveFileId: { not: null } }, { autoTracks: true }],
         processingState: { in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED] },
-        // An archived episode is not worth an hour of CPU. FAILED jobs are
-        // retried on every poll, so without this an archived failure would
-        // loop forever on content nobody can watch.
+        // An archived episode is not worth the work. FAILED jobs are retried on
+        // every poll, so without this an archived failure would loop forever on
+        // content nobody can watch.
         episode: { deletedAt: null },
       },
       orderBy: [{ episode: { animeId: 'asc' } }, { episode: { number: 'asc' } }],
@@ -52,6 +57,9 @@ export class AdminMediaJobsService {
       select: {
         id: true,
         masterDriveFileId: true,
+        autoTracks: true,
+        trackSourceQuality: true,
+        trackSourceFileId: true,
         processingState: true,
         processingError: true,
         label: true,
@@ -89,7 +97,7 @@ export class AdminMediaJobsService {
     const claimed = await this.prisma.mediaSource.updateMany({
       where: {
         id,
-        masterDriveFileId: { not: null },
+        OR: [{ masterDriveFileId: { not: null } }, { autoTracks: true }],
         processingState: { in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED] },
       },
       data: { processingState: MediaProcessingState.PROCESSING, processingError: null, updatedAt: new Date() },
@@ -100,22 +108,24 @@ export class AdminMediaJobsService {
   }
 
   /**
-   * Marks a job finished. `ready` is only accepted once the caller has actually
-   * written the renditions, so this cannot report success for an episode that
-   * still has nothing to play.
+   * Marks a job finished. `ready` needs something playable to exist, so a job
+   * cannot report success for an episode that has nothing to show.
    */
   async complete(id: string, ready: boolean, error?: string) {
     const source = await this.prisma.mediaSource.findUnique({
       where: { id },
-      select: { id: true, masterDriveFileId: true, _count: { select: { variants: true } } },
+      select: { id: true, masterDriveFileId: true, autoTracks: true, _count: { select: { variants: true } } },
     });
     if (!source) throw new NotFoundException('Media source not found');
-    if (!source.masterDriveFileId) throw new BadRequestException('That source has no master to process');
+    if (!source.masterDriveFileId && !source.autoTracks) {
+      throw new BadRequestException('That source has nothing to process');
+    }
 
     if (ready && source._count.variants === 0) {
-      // The old failure mode was a job that "succeeded" with only the master
-      // registered. Refusing here makes that impossible to record.
-      throw new BadRequestException('Cannot mark a job ready before any rendition has been registered');
+      // For a master job this catches the old failure mode: a run that
+      // "succeeded" having built nothing. For a track job the qualities came
+      // from the admin, so this only fires if they have since been removed.
+      throw new BadRequestException('Cannot mark a job ready while the episode has no video to play');
     }
 
     const updated = await this.prisma.mediaSource.update({
@@ -164,10 +174,12 @@ export class AdminMediaJobsService {
   async registerProducedMedia(id: string, dto: RegisterProducedMedia) {
     const source = await this.prisma.mediaSource.findUnique({
       where: { id },
-      select: { id: true, episodeId: true, masterDriveFileId: true },
+      select: { id: true, episodeId: true, masterDriveFileId: true, autoTracks: true },
     });
     if (!source) throw new NotFoundException('Media source not found');
-    if (!source.masterDriveFileId) throw new BadRequestException('That source has no master to process');
+    if (!source.masterDriveFileId && !source.autoTracks) {
+      throw new BadRequestException('That source has nothing to process');
+    }
 
     await this.prisma.$transaction(
       async (tx) => {
@@ -189,9 +201,14 @@ export class AdminMediaJobsService {
 
         // Audio and subtitles hang off the episode: they are separate playable
         // files, not HLS rendition groups.
-        if (dto.audioTracks?.length) {
+        //
+        // Present-but-empty is meaningful and must clear what is there. A
+        // source that used to carry two languages and now carries one has to
+        // lose the other, or the player would offer a track that no longer
+        // exists. Absent leaves them alone.
+        if (dto.audioTracks) {
           await tx.audioTrack.deleteMany({ where: { episodeId: source.episodeId } });
-          await tx.audioTrack.createMany({
+          if (dto.audioTracks.length) await tx.audioTrack.createMany({
             data: dto.audioTracks.map((track, order) => ({
               episodeId: source.episodeId,
               language: track.language,
@@ -203,9 +220,9 @@ export class AdminMediaJobsService {
           });
         }
 
-        if (dto.subtitleTracks?.length) {
+        if (dto.subtitleTracks) {
           await tx.subtitleTrack.deleteMany({ where: { episodeId: source.episodeId } });
-          await tx.subtitleTrack.createMany({
+          if (dto.subtitleTracks.length) await tx.subtitleTrack.createMany({
             data: dto.subtitleTracks.map((track) => ({
               episodeId: source.episodeId,
               language: track.language,
@@ -214,6 +231,15 @@ export class AdminMediaJobsService {
               isDefault: track.isDefault ?? false,
               isForced: track.isForced ?? false,
             })),
+          });
+        }
+        // Which file these tracks came from, so the admin panel can say so and
+        // so replacing that file re-runs detection rather than keeping tracks
+        // from a source that is no longer there.
+        if (dto.trackSourceFileId) {
+          await tx.mediaSource.update({
+            where: { id },
+            data: { trackSourceFileId: dto.trackSourceFileId },
           });
         }
       },
@@ -249,10 +275,13 @@ export class AdminMediaJobsService {
         id: true,
         label: true,
         masterDriveFileId: true,
+        autoTracks: true,
+        trackSourceQuality: true,
+        trackSourceFileId: true,
         processingState: true,
         processingError: true,
         processedAt: true,
-        variants: { select: { quality: true, isActive: true }, orderBy: { quality: 'asc' } },
+        variants: { select: { quality: true, driveFileId: true, isActive: true }, orderBy: { quality: 'asc' } },
         audioTracks: { select: { language: true, label: true, isDefault: true }, orderBy: { sortOrder: 'asc' } },
         subtitleTracks: { select: { language: true, label: true, isDefault: true } },
       },
@@ -261,8 +290,18 @@ export class AdminMediaJobsService {
     return sources.map((s) => ({
       id: s.id,
       label: s.label,
-      /** Presence of a master is what makes this a SINGLE_MASTER source. */
+      /** Presence of a master is what makes this a legacy transcoding source. */
       isSingleMaster: Boolean(s.masterDriveFileId),
+      autoTracks: s.autoTracks,
+      /**
+       * Which file the tracks came from. Reported so the operator can see it:
+       * two qualities of one episode do not always carry the same streams, and
+       * "English is missing" is a different problem depending on which was read.
+       */
+      trackSource: s.trackSourceFileId
+        ? (s.variants.find((v) => v.driveFileId === s.trackSourceFileId)?.quality ?? 'an earlier file')
+        : null,
+      trackSourcePreference: s.trackSourceQuality,
       processingState: s.processingState,
       processingError: s.processingError,
       processedAt: s.processedAt,

@@ -728,17 +728,37 @@ model MediaSource {
   /// Provider-specific extras (proxy overrides, headers, notes).
   config Json?
 
-  /// SINGLE_MASTER: the one Drive file an admin supplied, from which every
-  /// rendition, audio track and subtitle is derived. Null for MANUAL_VARIANTS,
-  /// where an admin supplies each file themselves.
+  /// Legacy AUTO_MASTER: one Drive file from which every rendition was built by
+  /// transcoding. Kept so episodes made that way keep playing and can still be
+  /// reprocessed, but it is no longer how new episodes are made — an admin now
+  /// supplies each quality and only the tracks are automatic.
   ///
-  /// This field is what turns a MediaSource into a job: set it and the local
-  /// worker will find the source, probe the master and fill in the rest. It is
-  /// never deleted or evicted — it is the source of truth for reprocessing.
+  /// Set, it turns this source into a transcoding job. Never deleted or
+  /// evicted: it is the source of truth for rebuilding.
   masterDriveFileId String?
 
-  /// Where that processing has got to. NOT_APPLICABLE is the MANUAL_VARIANTS
-  /// case, so existing rows keep working untouched.
+  /// Whether the worker should read this source's own video file and register
+  /// the audio and subtitle tracks it finds.
+  ///
+  /// Off by default so existing rows, including any with hand-entered tracks,
+  /// are never touched by a worker that did not exist when they were made.
+  /// The admin form turns it on for anything saved through it.
+  autoTracks Boolean @default(false)
+
+  /// Which uploaded quality to read those tracks from. Null means "the highest
+  /// available", which is what this should normally be left on. It exists
+  /// because two qualities of the same episode do not always carry the same
+  /// streams, and the operator may know which one is complete.
+  trackSourceQuality VideoQuality?
+
+  /// The file actually inspected. Recorded so the admin panel can say which
+  /// quality the tracks came from, and so replacing that file re-runs detection
+  /// instead of leaving tracks from a source that is no longer there.
+  trackSourceFileId String?
+
+  /// Where processing has got to. This describes the tracks only: the video
+  /// qualities are supplied by the admin and are playable whatever this says.
+  /// NOT_APPLICABLE means there is nothing to process.
   processingState MediaProcessingState @default(NOT_APPLICABLE)
   /// Why the last attempt failed, in words an operator can act on. Cleared on
   /// the next successful run.
@@ -756,6 +776,7 @@ model MediaSource {
   @@index([episodeId, kind])
   /// The worker polls for pending work; this keeps that a single indexed scan.
   @@index([processingState])
+  @@index([autoTracks, processingState])
   @@map("media_sources")
 }
 

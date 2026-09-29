@@ -30,12 +30,15 @@ function ago(seconds: number): string {
 
 /** ENCODING_720P is the worker's word; this is the admin's. */
 const STEP_WORDS: Record<string, string> = {
+  DOWNLOADING_SOURCE: 'downloading the track source',
   DOWNLOADING: 'downloading the master',
-  PROBING: 'reading the master',
-  UPLOADING: 'uploading',
+  PROBING: 'reading the file',
+  DETECTING_AUDIO: 'detecting audio',
   EXTRACTING_AUDIO: 'extracting audio',
+  DETECTING_SUBTITLES: 'detecting subtitles',
   CONVERTING_SUBTITLES: 'converting subtitles',
-  REGISTERING: 'registering',
+  UPLOADING: 'uploading',
+  REGISTERING: 'registering tracks',
 };
 
 function readableStep(step: string | null): string | null {
@@ -85,8 +88,8 @@ export function MediaWorkerStatus({ pollMs = 20_000 }: { pollMs?: number }) {
           {last ? <span className="text-[11.5px] text-ink-faint">Last seen {ago(last.secondsSinceSeen)}</span> : null}
         </div>
         <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint">
-          Uploads still work. Episodes stay queued and start processing on their own as soon as a media worker comes
-          online — nothing is lost and nothing needs re-saving.
+          Your video qualities are saved and already playable. Audio and subtitle detection starts automatically when
+          a track worker comes online — nothing is lost and nothing needs re-saving.
         </p>
       </div>
     );
