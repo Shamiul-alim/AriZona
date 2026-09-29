@@ -1,0 +1,59 @@
+# =============================================================================
+# AniZora media worker — standalone deployment
+# =============================================================================
+# This is the whole worker. It needs no database, no inbound port and no other
+# service on this machine: it reaches out to the AniZora API and to Google
+# Drive, and nothing reaches in.
+#
+# The image is built straight from the public repository, so this machine needs
+# neither Git nor a registry login — Docker fetches the source itself.
+#
+#   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d
+#
+# Normal operation is: leave it running. It survives reboots on its own.
+# =============================================================================
+
+services:
+  media-worker:
+    build:
+      # "#main:backend" means branch main, build from the backend/ folder.
+      # Pin a tag or commit here instead if you want a fixed version.
+      context: ${WORKER_SOURCE:-https://github.com/Shamiul-alim/AriZona.git#main:backend}
+      dockerfile: Dockerfile.media-worker
+    image: anizora-media-worker:local
+    container_name: anizora-media-worker
+
+    # The whole point: comes back after a reboot, after a crash, after Docker
+    # itself restarts — without anyone logging in to start it.
+    restart: unless-stopped
+
+    env_file:
+      - .env.worker
+
+    environment:
+      # Transcoding already uses every core it is given, so a second job in
+      # parallel makes both slower and doubles the disk needed.
+      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-1}
+      WORK_DIR: /var/tmp/anizora-media
+
+    volumes:
+      # Scratch space for masters and renditions in progress. A named volume
+      # keeps it off the container layer and lets a job survive a restart.
+      - media-work:/var/tmp/anizora-media
+
+    # Generous enough for 1080p, bounded so a runaway encode cannot take the
+    # whole machine down with it.
+    deploy:
+      resources:
+        limits:
+          cpus: ${WORKER_CPUS:-2}
+          memory: ${WORKER_MEMORY:-4G}
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  media-work:

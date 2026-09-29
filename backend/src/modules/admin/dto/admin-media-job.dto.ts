@@ -144,3 +144,41 @@ export class RegisterMediaDto {
   @Type(() => ProducedSubtitleDto)
   subtitleTracks?: ProducedSubtitleDto[];
 }
+
+/**
+ * A worker saying it is still there.
+ *
+ * Everything is optional except the id, so a worker running an older build can
+ * keep reporting presence even as this grows. Nothing here identifies the
+ * machine: no hostname, no address, no paths.
+ */
+export class WorkerHeartbeatDto {
+  @ApiProperty({ description: 'Random id the worker generates once and keeps. Not a secret, not a credential.' })
+  @IsString()
+  @MaxLength(64)
+  workerId!: string;
+
+  @ApiPropertyOptional({ example: 'BUSY', description: 'IDLE or BUSY.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  status?: string;
+
+  @ApiPropertyOptional({ example: 'Solo Leveling S1E2' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  currentJobLabel?: string;
+
+  @ApiPropertyOptional({ example: 'ENCODING_720P' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  currentStep?: string;
+
+  @ApiPropertyOptional({ example: '1.0.0' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  version?: string;
+}

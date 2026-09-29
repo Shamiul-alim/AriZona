@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { google } from 'googleapis';
 import {
   planLadder,
@@ -58,6 +59,10 @@ const CONCURRENCY = Math.max(1, Number(process.env.MEDIA_WORKER_CONCURRENCY ?? 1
 /** Refuse to start a job without room for the master plus its renditions. */
 const MIN_FREE_BYTES = Number(process.env.MIN_FREE_DISK_BYTES ?? 12 * 1024 ** 3);
 const ONCE = process.argv.includes('--once');
+/** Validate the configuration and exit. What the installer runs to prove setup works. */
+const CHECK = process.argv.includes('--check');
+/** Reported with the heartbeat so a support question can start from a build. */
+const WORKER_VERSION = process.env.MEDIA_WORKER_VERSION ?? '1.0.0';
 
 const MB = (n: number) => (n / 1024 ** 2).toFixed(1);
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -86,9 +91,74 @@ async function api<T>(pathname: string, init: { method?: string; body?: unknown 
   return text ? (JSON.parse(text) as T) : (null as T);
 }
 
-/** Best-effort progress. A failed heartbeat must never fail the job. */
+/** What this worker is on, for the heartbeat. Null between jobs. */
+let currentJobLabel: string | null = null;
+
+/**
+ * Best-effort progress. A failed report must never fail the job.
+ *
+ * Also refreshes this worker's presence, so “what is it doing” and “is it
+ * still there” are answered by one call and cannot drift apart.
+ */
 async function progress(jobId: string, stepName: string, detail?: string): Promise<void> {
-  await api(`/media-worker/jobs/${jobId}/progress`, { body: { step: stepName, detail } }).catch(() => undefined);
+  await Promise.all([
+    api(`/media-worker/jobs/${jobId}/progress`, { body: { step: stepName, detail } }).catch(() => undefined),
+    heartbeat('BUSY', currentJobLabel, stepName),
+  ]);
+}
+
+// --- identity ---------------------------------------------------------------
+
+/**
+ * A stable id for this worker, so the admin panel can say a worker is online
+ * rather than only that a job is queued.
+ *
+ * It is not a credential and grants nothing — the token does that. It lives in
+ * the work directory so a restart keeps the same identity, and a machine that
+ * is replaced simply introduces a new one. MEDIA_WORKER_ID overrides it for
+ * deployments that would rather set identity explicitly.
+ */
+function workerIdentity(): string {
+  const configured = process.env.MEDIA_WORKER_ID?.trim();
+  if (configured) return configured.slice(0, 64);
+
+  const file = path.join(WORK_DIR, 'worker-id');
+  try {
+    const existing = fs.readFileSync(file, 'utf8').trim();
+    if (existing) return existing.slice(0, 64);
+  } catch {
+    // First run on this machine.
+  }
+  const fresh = randomUUID();
+  try {
+    fs.mkdirSync(WORK_DIR, { recursive: true });
+    fs.writeFileSync(file, fresh, 'utf8');
+  } catch {
+    // A read-only work dir means a new id each restart, which is worse but not
+    // worth refusing to run over.
+  }
+  return fresh;
+}
+
+const WORKER_ID = workerIdentity();
+
+/**
+ * “Still here.” Sent whether or not there is work, because a quiet queue and a
+ * switched-off machine otherwise look identical to an admin.
+ *
+ * Best-effort throughout: presence is a convenience, and failing to report it
+ * must never stop a job or kill the loop.
+ */
+async function heartbeat(status: 'IDLE' | 'BUSY', jobLabel?: string | null, stepName?: string | null): Promise<void> {
+  await api('/media-worker/heartbeat', {
+    body: {
+      workerId: WORKER_ID,
+      status,
+      currentJobLabel: jobLabel ?? undefined,
+      currentStep: stepName ?? undefined,
+      version: WORKER_VERSION,
+    },
+  }).catch(() => undefined);
 }
 
 // --- process helpers --------------------------------------------------------
@@ -360,6 +430,7 @@ const baseName = (job: Job) => `${job.episode.anime.slug.replace(/[^a-z0-9-]/gi,
 
 async function processJob(job: Job): Promise<void> {
   log(`\n${describe(job)}`);
+  currentJobLabel = describe(job);
   const base = baseName(job);
   const jobDir = path.join(WORK_DIR, job.id);
   await fsp.mkdir(jobDir, { recursive: true });
@@ -498,6 +569,7 @@ async function processJob(job: Job): Promise<void> {
 // --- loop -------------------------------------------------------------------
 
 async function tick(): Promise<number> {
+  await heartbeat(currentJobLabel ? 'BUSY' : 'IDLE', currentJobLabel);
   const jobs = await api<Job[]>('/media-worker/jobs?limit=20');
   if (jobs.length === 0) return 0;
 
@@ -509,6 +581,7 @@ async function tick(): Promise<number> {
 
     try {
       await processJob({ ...job, ...claimed });
+      currentJobLabel = null;
       done++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -516,12 +589,83 @@ async function tick(): Promise<number> {
       // Recorded with its cause, so the admin panel can show why rather than
       // leaving an episode that looks finished with nothing to play.
       await api(`/media-worker/jobs/${job.id}/complete`, { body: { ready: false, error: message } }).catch(() => undefined);
+      currentJobLabel = null;
     }
   }
   return done;
 }
 
+/**
+ * Proves the configuration works, then exits.
+ *
+ * Every check here is something that would otherwise fail hours later, on the
+ * first real job, with a worse error: a token that was mistyped, Drive
+ * credentials that were never granted, a disk with no room. The installer runs
+ * this so a bad setup is caught while the person is still sitting there.
+ */
+async function preflight(): Promise<void> {
+  const results: Array<[string, string]> = [];
+  let failed = false;
+  const check = async (name: string, fn: () => Promise<string>) => {
+    try {
+      results.push([name, `OK    ${await fn()}`]);
+    } catch (error) {
+      failed = true;
+      results.push([name, `FAIL  ${error instanceof Error ? error.message : String(error)}`]);
+    }
+  };
+
+  await check('FFmpeg', async () => (await assertFfmpeg()).replace(/^ffmpeg version /, ''));
+  await check('Backend', async () => {
+    const res = await fetch(`${API}/health`);
+    if (!res.ok) throw new Error(`${API}/health returned ${res.status}`);
+    return API;
+  });
+  await check('Worker token', async () => {
+    const res = await fetch(`${API}/media-worker/jobs?limit=1`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    if (res.status === 401) {
+      const body = (await res.text()).includes('not configured')
+        ? 'the backend has no MEDIA_WORKER_TOKEN set'
+        : 'this token does not match the backend';
+      throw new Error(`rejected — ${body}`);
+    }
+    if (!res.ok) throw new Error(`the queue returned ${res.status}`);
+    return 'accepted';
+  });
+  await check('Drive (read masters)', async () => {
+    await masterClient().files.list({ pageSize: 1, fields: 'files(id)' });
+    return 'can read';
+  });
+  await check('Drive (write renditions)', async () => {
+    const drive = uploadClient();
+    await folderId(drive, CACHE_FOLDER_NAME);
+    return `can write to “${CACHE_FOLDER_NAME}”`;
+  });
+  await check('Work directory', async () => {
+    await fsp.mkdir(WORK_DIR, { recursive: true });
+    const free = await freeSpace(WORK_DIR);
+    if (free < MIN_FREE_BYTES) {
+      throw new Error(`only ${MB(free)} MB free; ${MB(MIN_FREE_BYTES)} MB needed for a 1080p master`);
+    }
+    return `${WORK_DIR} (${MB(free)} MB free)`;
+  });
+
+  for (const [name, result] of results) console.log(`  ${name.padEnd(24, '.')} ${result}`);
+  if (failed) {
+    console.error('\nSetup is not complete. See docs/MEDIA_WORKER_DEPLOYMENT.md.');
+    process.exit(1);
+  }
+  console.log('\nEverything checks out. The worker is ready to process jobs.');
+}
+
+
 async function main(): Promise<void> {
+  if (CHECK) {
+    log('AniZora media worker — checking configuration');
+    await preflight();
+    return;
+  }
+
   log('AniZora media worker starting');
   log(`FFmpeg: ${await assertFfmpeg()}`);
   log(`API: ${API}`);
@@ -533,7 +677,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  log(`Polling every ${POLL_SECONDS}s. SIGTERM or Ctrl+C to stop.`);
+  await heartbeat('IDLE');
+  log(`Worker ${WORKER_ID.slice(0, 8)}… polling every ${POLL_SECONDS}s. SIGTERM or Ctrl+C to stop.`);
   let idle = false;
   while (!stopping) {
     try {
@@ -551,6 +696,10 @@ async function main(): Promise<void> {
     if (stopping) break;
     await new Promise((r) => setTimeout(r, POLL_SECONDS * 1000));
   }
+  // One last beat with no job, so a clean stop is not mistaken for a worker
+  // that died mid-encode.
+  currentJobLabel = null;
+  await heartbeat('IDLE');
   log('Stopped.');
 }
 

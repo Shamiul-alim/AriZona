@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { authFetch } from '@/lib/auth-store';
 import { Badge, Button, Card } from '@/components/admin/ui';
+import { MediaWorkerStatus } from './MediaWorkerStatus';
 
 type State = 'NOT_APPLICABLE' | 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED';
 
@@ -29,7 +30,7 @@ const TONE: Record<State, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = {
 const EXPLAIN: Record<State, string> = {
   READY: 'Everything the master implies has been built.',
   PROCESSING: 'A worker has claimed this and is building it now.',
-  PENDING: 'Queued. The media worker picks this up on its next poll — nothing to run by hand.',
+  PENDING: 'Queued. A media worker takes it from here — nothing to run by hand.',
   FAILED: 'The last attempt stopped. The cause is below; the worker retries on its next poll.',
   NOT_APPLICABLE: 'Manual variants — you supply each file, so there is nothing to process.',
 };
@@ -78,10 +79,12 @@ export function MediaProcessingStatus({ episodeId }: { episodeId?: string }) {
 
   return (
     <Card title="Media processing" description="What the worker has built from the master.">
+      <MediaWorkerStatus />
+
       {loading ? (
-        <p className="text-[13px] text-ink-muted">Checking…</p>
+        <p className="mt-4 text-[13px] text-ink-muted">Checking…</p>
       ) : (
-        <div className="space-y-4">
+        <div className="mt-4 space-y-4">
           {singleMaster.map((row) => (
             <div key={row.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">

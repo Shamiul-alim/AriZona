@@ -35,6 +35,7 @@ import { AdminEpisodesService } from './admin-episodes.service';
 import { AdminSeasonsService } from './admin-seasons.service';
 import { AdminMediaJobsService } from './admin-media-jobs.service';
 import { MasterUploadService } from './master-upload.service';
+import { MediaWorkerPresenceService } from './media-worker-presence.service';
 import { CompleteMediaJobDto } from './dto/admin-media-job.dto';
 import { AdminTaxonomyService } from './admin-taxonomy.service';
 import { AdminUsersService } from './admin-users.service';
@@ -103,6 +104,7 @@ export class AdminController {
     private readonly masterUpload: MasterUploadService,
     private readonly analytics: AnalyticsService,
     private readonly mediaRegistry: MediaProviderRegistry,
+    private readonly workerPresence: MediaWorkerPresenceService,
   ) {}
 
   // --- Dashboard ------------------------------------------------------------
@@ -141,6 +143,16 @@ export class AdminController {
   }
 
   // --- SINGLE_MASTER media jobs ---------------------------------------------
+
+  /**
+   * Whether a media worker is listening, so the panel can say "queued, a worker
+   * will take this" rather than leaving a normal wait looking like a failure.
+   */
+  @Get('media/worker-status')
+  @ApiOperation({ summary: 'Presence of the media workers' })
+  mediaWorkerStatus() {
+    return this.workerPresence.status();
+  }
 
   @Get("media/jobs")
   @ApiOperation({ summary: "SINGLE_MASTER sources awaiting a worker" })

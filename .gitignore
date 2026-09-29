@@ -18,6 +18,9 @@ out/
 **/.env
 **/.env.*
 !**/.env.example
+# Template for the client-owned worker. The real .env.worker beside it stays
+# ignored by the rule above.
+!**/.env.worker.example
 
 # Credentials (Google service accounts, OAuth clients, keys)
 *.pem

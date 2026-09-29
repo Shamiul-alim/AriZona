@@ -263,6 +263,171 @@ lives for tens of minutes. Free tiers of typical app platforms — including the
 Render free plan this project's API runs on — do not provide that: they cap
 request duration, offer no persistent disk and idle the instance out.
 
-The worker is therefore packaged to run anywhere a container can: a small VPS,
-a spare machine, or any container host with a disk. The rest of AniZora is
-unaffected and continues to run where it does today.
+The worker is therefore packaged to run anywhere a container can: a spare
+machine, a mini PC, a NAS, or a VPS if one is ever bought. The rest of AniZora
+is unaffected and continues to run where it does today.
+
+---
+
+# NO-CARD DEPLOYMENT — CLIENT-OWNED WORKER
+
+The deployment this project actually ships with. It needs no credit card, no
+cloud account and no subscription, because the encoding runs on a machine the
+recipient already owns.
+
+Everything else stays hosted: **Vercel** (site), **Render** (API), **Supabase**
+(database), **Google Drive** (media). Only the FFmpeg compute moves.
+
+Ready-made installers live in [`deploy/media-worker/`](../deploy/media-worker/),
+with a recipient-facing guide in its own
+[README](../deploy/media-worker/README.md). What follows is the operator's view.
+
+## Why a machine and not a free cloud tier
+
+Several platforms advertise a free tier that looks like it would do. None of
+them will: a 24-minute episode needs roughly 35–50 minutes of uninterrupted CPU
+and about 1 GB of scratch space held for the duration. Free tiers cap request
+duration, sleep idle instances, and give no persistent disk. Picking one would
+mean jobs that die halfway with no clear reason.
+
+An ordinary desktop does the job well and costs nothing extra.
+
+## A. Windows installation
+
+Primary target, because it is what a recipient most likely already has.
+
+1. Install **Docker Desktop** and leave *"Start Docker Desktop when you log in"*
+   ticked. That single setting is what makes the worker survive a reboot.
+2. Open PowerShell in `deploy/media-worker/windows`.
+3. `.\install-worker.ps1`
+
+FFmpeg is inside the image — nothing to install, no PATH to configure, no
+version to match.
+
+## B. Linux installation
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER            # log out and back in
+sudo systemctl enable --now docker       # starts with the machine
+cd deploy/media-worker/linux && ./install-worker.sh
+```
+
+Same image, same configuration, same behaviour. Nothing in the worker is
+Windows-specific.
+
+## C. One-time secrets
+
+The installer prompts for these and writes them to `.env.worker`, which it
+restricts to the installing user. Nothing is echoed to the screen or left in
+shell history.
+
+| | |
+| --- | --- |
+| `API_URL` | `https://arizona-3.onrender.com/api` |
+| `MEDIA_WORKER_TOKEN` | Must match the Render backend exactly |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | Reading masters |
+| `GOOGLE_DRIVE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN` | Writing generated media |
+
+Base64 is preferred over a file path so no machine-specific path is ever baked
+into a deployment. `GOOGLE_SERVICE_ACCOUNT_FILE` still works for anyone who
+would rather mount a file.
+
+### Generating and placing the token
+
+```bash
+openssl rand -base64 32
+```
+
+The same value goes in exactly two places: the Render backend environment, and
+the worker's `.env.worker`. It must never appear in the frontend, in any
+`NEXT_PUBLIC_*` variable, in Git, or in a document.
+
+Until it is set on Render, the worker endpoints stay closed — the guard fails
+shut rather than open, so a half-finished setup is never a hole.
+
+## D. Day-to-day commands
+
+Run from `deploy/media-worker/windows` or `.../linux`:
+
+| | Windows | Linux |
+| --- | --- | --- |
+| Status | `.\status-worker.ps1` | `./status-worker.sh` |
+| Logs | `.\logs-worker.ps1` | `./logs-worker.sh` |
+| Start | `.\start-worker.ps1` | `./start-worker.sh` |
+| Stop | `.\stop-worker.ps1` | `./stop-worker.sh` |
+| Update | `.\update-worker.ps1` | `./update-worker.sh` |
+| Remove | `.\uninstall-worker.ps1` | `./uninstall-worker.sh` |
+
+None of these is needed per episode. They exist for the rare day something
+looks wrong.
+
+## E. Automatic startup
+
+Two layers, both needed:
+
+- The container is `restart: unless-stopped`, so Docker brings it back after a
+  crash, a reboot or a Docker restart.
+- Docker itself must start with the machine — Docker Desktop's login setting on
+  Windows, `systemctl enable docker` on Linux. The installer checks this and
+  says so if it is off.
+
+No Scheduled Task is installed. Docker's own restart policy already covers
+every case one would handle, and a task that races the Docker daemon at boot
+causes more trouble than it solves.
+
+No terminal window needs to stay open.
+
+## F. Offline queue behaviour
+
+A worker machine that is switched off is a normal state, not a fault:
+
+| | |
+| --- | --- |
+| Admin uploads a master | Works. |
+| Episode state | `PENDING`. |
+| Admin panel | *Worker offline — processing begins automatically when a worker comes online.* |
+| When the machine starts | Docker starts → worker starts → queue drains. |
+
+Nothing is lost, nothing needs re-saving, and a wait is never reported as a
+failure. The worker heartbeats every poll, which is what lets the panel tell a
+quiet queue apart from a broken pipeline.
+
+Stopping mid-encode is equally safe: the claim goes stale after 90 minutes and
+the job returns to the queue, where finished renditions are reused rather than
+rebuilt.
+
+## G. Moving the worker to another machine
+
+The worker holds no permanent state — only scratch files for the job in hand.
+
+1. Old machine: `uninstall-worker`.
+2. New machine: install Docker, run the installer, give the same answers.
+
+Queued jobs continue on the new machine. No database migration, no media
+re-upload, no library rebuild. The same is true of moving to a VPS later: the
+identical container runs there with no code change.
+
+## H. Backup and recovery
+
+Masters are the only irreplaceable artefact; everything else is rebuilt from
+them. Back up the `AniZora masters` Drive folder.
+
+To rebuild an episode, open it in the admin panel and save it again. That
+re-queues the job, and the worker regenerates only what is missing.
+
+The worker needs no backup at all.
+
+## I. Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `Docker is not running` | Docker Desktop not started | Start it; the worker follows on its own |
+| `Authentication: Rejected` | Token mismatch, or Render has none set | Re-run the installer; check Render |
+| `Backend: Unreachable` | No internet on the worker machine | It retries by itself; nothing is lost |
+| Container keeps exiting | Usually disk space | `logs` names it; the worker refuses jobs below the floor |
+| Episode `FAILED` | Shown with its cause in the admin panel | Fix the cause; it retries on the next poll |
+| Admin says worker offline but it is running | Clock skew or no network | Check `status` on the machine |
+
+`status` also runs the worker's own preflight checks, so it reports the same
+verdict the worker itself would reach.

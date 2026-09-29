@@ -3,7 +3,13 @@ import { ApiExcludeController, ApiOperation } from '@nestjs/swagger';
 import { Public } from 'src/common/decorators';
 import { AdminMediaJobsService } from './admin-media-jobs.service';
 import { MediaWorkerGuard } from './media-worker.guard';
-import { CompleteMediaJobDto, RegisterMediaDto, ReportProgressDto } from './dto/admin-media-job.dto';
+import { MediaWorkerPresenceService } from './media-worker-presence.service';
+import {
+  CompleteMediaJobDto,
+  RegisterMediaDto,
+  ReportProgressDto,
+  WorkerHeartbeatDto,
+} from './dto/admin-media-job.dto';
 
 /**
  * The media worker's entire API surface.
@@ -20,7 +26,21 @@ import { CompleteMediaJobDto, RegisterMediaDto, ReportProgressDto } from './dto/
 @UseGuards(MediaWorkerGuard)
 @Controller('media-worker')
 export class MediaWorkerController {
-  constructor(private readonly jobs: AdminMediaJobsService) {}
+  constructor(
+    private readonly jobs: AdminMediaJobsService,
+    private readonly presence: MediaWorkerPresenceService,
+  ) {}
+
+  /**
+   * “Still here.” Sent whether or not there is work, which is the point: a
+   * quiet queue and a switched-off machine look identical otherwise, and the
+   * admin panel should not call the first one a failure.
+   */
+  @Post('heartbeat')
+  @ApiOperation({ summary: 'Report that this worker is listening' })
+  heartbeat(@Body() dto: WorkerHeartbeatDto) {
+    return this.presence.record(dto);
+  }
 
   @Get('jobs')
   @ApiOperation({ summary: 'Masters waiting to be processed' })

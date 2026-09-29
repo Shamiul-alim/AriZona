@@ -1519,3 +1519,34 @@ model ActivityLog {
   @@index([createdAt(sort: Desc)])
   @@map("activity_logs")
 }
+
+/// A media worker that has called in.
+///
+/// The worker runs on hardware the site operator owns, which may be a desktop
+/// that is switched off overnight. Knowing whether one is listening is the
+/// difference between "queued, a worker will take this" and "something is
+/// broken" — two situations that otherwise look identical in the admin panel.
+///
+/// Deliberately holds nothing private about the machine: no hostname, no IP, no
+/// paths. The id is a random value the worker generates once and keeps.
+model MediaWorker {
+  id String @id @db.VarChar(64)
+
+  lastSeenAt DateTime
+  /// IDLE or BUSY. A plain string so a worker running an older build cannot
+  /// break the admin panel by reporting a value this schema has not heard of.
+  status     String   @default("IDLE") @db.VarChar(16)
+
+  /// What it is doing right now, in words an admin can read, e.g.
+  /// "Solo Leveling S1E2" / "ENCODING_720P". Null when idle.
+  currentJobLabel String? @db.VarChar(200)
+  currentStep     String? @db.VarChar(60)
+
+  /// Worker build, for support questions. Not a secret.
+  version String? @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  @@index([lastSeenAt(sort: Desc)])
+  @@map("media_workers")
+}
