@@ -45,9 +45,18 @@ interface SourceDraft {
   embedUrl: string;
   isDefault: boolean;
   /** SINGLE_MASTER: the one Drive file the worker derives everything from. */
+  /**
+   * Which media workflow this source uses. Held explicitly rather than
+   * inferred from whether the master URL is filled in: choosing the mode and
+   * supplying the file are two separate steps, and conflating them meant the
+   * mode could not be selected before a URL existed.
+   */
+  mediaMode: MediaMode;
   masterDriveFileIdOrUrl: string;
   variants: VariantDraft[];
 }
+
+type MediaMode = 'SINGLE_MASTER' | 'MANUAL_VARIANTS';
 
 interface SubtitleDraft {
   language: string;
@@ -123,6 +132,7 @@ function newSource(index: number): SourceDraft {
     hlsUrl: '',
     embedUrl: '',
     isDefault: index === 0,
+    mediaMode: 'MANUAL_VARIANTS',
     masterDriveFileIdOrUrl: '',
     variants: [{ quality: 'Q_1080P', driveFileIdOrUrl: '', directUrl: '', isDefault: false }],
   };
@@ -226,6 +236,8 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                 hlsUrl: String(source.hlsUrl ?? ''),
                 embedUrl: String(source.embedUrl ?? ''),
                 isDefault: Boolean(source.isDefault),
+                // A stored master means the worker built this source.
+                mediaMode: source.masterDriveFileId ? 'SINGLE_MASTER' : 'MANUAL_VARIANTS',
                 masterDriveFileIdOrUrl: String(source.masterDriveFileId ?? ''),
                 variants: ((source.variants as Array<Record<string, unknown>>) ?? []).map((v) => ({
                   quality: String(v.quality ?? 'Q_720P'),
@@ -296,6 +308,19 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
       return;
     }
 
+    // A SINGLE_MASTER source is nothing without its master: saving one with
+    // an empty field would queue a job the worker cannot run.
+    const missingMaster = sources.find(
+      (s) => s.mediaMode === 'SINGLE_MASTER' && !s.masterDriveFileIdOrUrl.trim(),
+    );
+    if (missingMaster) {
+      setBanner({
+        tone: 'error',
+        text: `Master Google Drive URL is required for SINGLE_MASTER (source “${missingMaster.label}”).`,
+      });
+      return;
+    }
+
     setSaving(true);
     setBanner(null);
 
@@ -327,10 +352,11 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
         hlsUrl: source.provider === 'HLS' ? source.hlsUrl : undefined,
         embedUrl: source.provider === 'EXTERNAL_EMBED' ? source.embedUrl : undefined,
         isDefault: source.isDefault,
-        masterDriveFileIdOrUrl: source.masterDriveFileIdOrUrl.trim() || undefined,
+        masterDriveFileIdOrUrl:
+          source.mediaMode === 'SINGLE_MASTER' ? source.masterDriveFileIdOrUrl.trim() : undefined,
         // With a master the worker owns the renditions; sending hand-typed ones
         // would fight it. Without one this is the unchanged manual path.
-        variants: source.masterDriveFileIdOrUrl.trim()
+        variants: source.mediaMode === 'SINGLE_MASTER'
           ? []
           : PROVIDERS.find((p) => p.value === source.provider)?.needsVariants
           ? source.variants
@@ -689,9 +715,9 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                       </label>
                     ) : null}
 
-                    {/* SINGLE_MASTER vs MANUAL_VARIANTS. The mode is not a stored
-                        field: a source with a master is a SINGLE_MASTER source,
-                        which keeps one fact in one place. */}
+                    {/* SINGLE_MASTER vs MANUAL_VARIANTS. The mode is explicit
+                        state: choosing it and supplying the master are two separate
+                        steps, so the mode can be picked before any URL exists. */}
                     {providerMeta?.needsVariants ? (
                       <div className="mt-3 rounded-lg border border-line-soft bg-base/50 p-3">
                         <Label hint="One master file, or one file per quality that you supply yourself.">
@@ -700,25 +726,17 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                         <div className="mt-1.5 flex flex-wrap gap-2">
                           {(
                             [
-                              { key: 'single', label: 'SINGLE_MASTER', hint: 'One master, processed automatically' },
-                              { key: 'manual', label: 'MANUAL_VARIANTS', hint: 'You supply each quality' },
+                              { key: 'SINGLE_MASTER', label: 'SINGLE_MASTER', hint: 'One master, processed automatically' },
+                              { key: 'MANUAL_VARIANTS', label: 'MANUAL_VARIANTS', hint: 'You supply each quality' },
                             ] as const
                           ).map((mode) => {
-                            const active =
-                              mode.key === 'single'
-                                ? Boolean(source.masterDriveFileIdOrUrl.trim())
-                                : !source.masterDriveFileIdOrUrl.trim();
+                            const active = source.mediaMode === mode.key;
                             return (
                               <button
                                 key={mode.key}
                                 type="button"
                                 aria-pressed={active}
-                                onClick={() =>
-                                  updateSource(sourceIndex, {
-                                    masterDriveFileIdOrUrl:
-                                      mode.key === 'single' ? source.masterDriveFileIdOrUrl || ' ' : '',
-                                  })
-                                }
+                                onClick={() => updateSource(sourceIndex, { mediaMode: mode.key })}
                                 className={cn(
                                   'rounded-lg border px-3 py-2 text-left text-[12.5px] transition',
                                   active
@@ -733,7 +751,7 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                           })}
                         </div>
 
-                        {source.masterDriveFileIdOrUrl.trim() ? (
+                        {source.mediaMode === 'SINGLE_MASTER' ? (
                           <label className="mt-3 block">
                             <Label
                               required
@@ -742,7 +760,7 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                               Master Drive URL
                             </Label>
                             <input
-                              value={source.masterDriveFileIdOrUrl.trim()}
+                              value={source.masterDriveFileIdOrUrl}
                               onChange={(e) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: e.target.value })}
                               placeholder="https://drive.google.com/file/d/…"
                               className={adminInput}
@@ -756,7 +774,7 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                       </div>
                     ) : null}
 
-                    {providerMeta?.needsVariants && !source.masterDriveFileIdOrUrl.trim() ? (
+                    {providerMeta?.needsVariants && source.mediaMode === 'MANUAL_VARIANTS' ? (
                       <div className="mt-3">
                         <div className="mb-2 flex items-center justify-between">
                           <Label hint="Each quality is a separate file for this provider. That is what makes quality switching work.">
