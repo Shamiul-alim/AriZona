@@ -109,6 +109,36 @@ if [ "$KEEP_CONFIG" != 1 ]; then
   grey "  reading to read-only; the worker works fine without it. Enter to skip."
   SA_B64="$(read_secret 'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (optional)' optional)"
 
+  # Catch a mis-pasted credential here, where the message can name the value,
+  # rather than letting the worker fail later with invalid_client or an
+  # invalid authorization header. Only lengths and shapes are ever reported.
+  PROBLEMS=""
+  # "if" rather than "[ ... ] &&": common.sh sets -e, and a false test at the
+  # head of an && list makes the whole list return non-zero, which would abort
+  # the installer in exactly the case where the credential was fine.
+  if [ "${#TOKEN}" -lt 16 ]; then
+    PROBLEMS="$PROBLEMS\n    - MEDIA_WORKER_TOKEN is only ${#TOKEN} characters."
+  fi
+  case "$CLIENT_ID" in
+    *.apps.googleusercontent.com) ;;
+    *) PROBLEMS="$PROBLEMS\n    - GOOGLE_DRIVE_CLIENT_ID does not end in .apps.googleusercontent.com." ;;
+  esac
+  if [ "${#CLIENT_SECRET}" -lt 10 ]; then
+    PROBLEMS="$PROBLEMS\n    - GOOGLE_DRIVE_CLIENT_SECRET is only ${#CLIENT_SECRET} characters."
+  fi
+  if [ "${#REFRESH_TOKEN}" -lt 20 ]; then
+    PROBLEMS="$PROBLEMS\n    - GOOGLE_DRIVE_REFRESH_TOKEN is only ${#REFRESH_TOKEN} characters."
+  fi
+
+  if [ -n "$PROBLEMS" ]; then
+    echo
+    red "These values do not look right, so nothing was written:"
+    printf '%b\n' "$PROBLEMS"
+    echo
+    grey "  Run the installer again and re-paste the values."
+    exit 1
+  fi
+
   # Created with no permissions, then written: the credentials are never
   # briefly world-readable on a shared machine.
   ( umask 077; : > "$ENV_FILE" )
@@ -120,7 +150,9 @@ if [ "$KEEP_CONFIG" != 1 ]; then
     echo "GOOGLE_DRIVE_CLIENT_ID=$CLIENT_ID"
     echo "GOOGLE_DRIVE_CLIENT_SECRET=$CLIENT_SECRET"
     echo "GOOGLE_DRIVE_REFRESH_TOKEN=$REFRESH_TOKEN"
-    echo "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$SA_B64"
+    # Only written when there is one: an empty assignment is valid but makes
+    # the file look misconfigured to anyone reading it.
+    if [ -n "$SA_B64" ]; then echo "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$SA_B64"; fi
     echo "MEDIA_WORKER_CONCURRENCY=1"
   } >> "$ENV_FILE"
   chmod 600 "$ENV_FILE"

@@ -93,16 +93,124 @@ if (-not $UseExistingConfig) {
     $apiUrl = Read-Host "  AniZora API URL [$defaultApi]"
     if ([string]::IsNullOrWhiteSpace($apiUrl)) { $apiUrl = $defaultApi }
 
-    # Read-Host -AsSecureString keeps the value off the screen and out of the
-    # PowerShell history buffer.
+    # Reads one secret with the characters hidden.
+    #
+    # This does not use Read-Host -AsSecureString, which is what the installer
+    # used to do and which quietly truncated pasted credentials. In the console
+    # host, Ctrl+V is not a paste shortcut: it arrives at the reader as the
+    # single control character 0x16 (SYN). Read-Host accepted that character as
+    # the whole secret and Enter ended the line, so a pasted 40-character token
+    # was stored as one unprintable byte - the MEDIA_WORKER_TOKEN length = 1
+    # that produced UND_ERR_INVALID_ARG, and the mangled OAuth values that
+    # produced invalid_client.
+    #
+    # So the keys are read one at a time and 0x16 is handled by fetching the
+    # clipboard ourselves. Terminals that paste by injecting the text (Windows
+    # Terminal, and right-click in the console host) deliver ordinary
+    # characters and go through the normal path below.
+    function Get-ClipboardText {
+        # Get-Clipboard needs an STA thread; if the host is not one, fall back
+        # to a short-lived STA runspace rather than failing the paste.
+        try {
+            if ([Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA') {
+                return [string](Get-Clipboard -Format Text -Raw -ErrorAction Stop)
+            }
+        }
+        catch { }
+        try {
+            $ps = [PowerShell]::Create()
+            [void]$ps.AddScript('Get-Clipboard -Format Text -Raw')
+            $ps.Runspace = [RunspaceFactory]::CreateRunspace()
+            $ps.Runspace.ApartmentState = 'STA'
+            $ps.Runspace.Open()
+            $out = $ps.Invoke()
+            $ps.Runspace.Close()
+            $ps.Dispose()
+            if ($out.Count -gt 0) { return [string]$out[0] }
+        }
+        catch { }
+        return ''
+    }
+
     function Read-Secret {
         param([string]$Prompt, [switch]$Optional)
+
         while ($true) {
-            $secure = Read-Host "  $Prompt" -AsSecureString
-            $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
-                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-            if ($plain -or $Optional) { return $plain }
-            Write-Host '    This one is required.' -ForegroundColor Yellow
+            Write-Host "  $Prompt" -NoNewline
+            Write-Host ': ' -NoNewline
+
+            $sb = New-Object Text.StringBuilder
+            $pasteHadNewline = $false
+
+            while ($true) {
+                $key = [Console]::ReadKey($true)
+
+                if ($key.Key -eq [ConsoleKey]::Enter) { break }
+
+                if ($key.Key -eq [ConsoleKey]::Backspace) {
+                    if ($sb.Length -gt 0) {
+                        [void]$sb.Remove($sb.Length - 1, 1)
+                        # Rub out the last mask character.
+                        Write-Host "`b `b" -NoNewline
+                    }
+                    continue
+                }
+
+                if ($key.Key -eq [ConsoleKey]::Escape) {
+                    while ($sb.Length -gt 0) {
+                        [void]$sb.Remove($sb.Length - 1, 1)
+                        Write-Host "`b `b" -NoNewline
+                    }
+                    continue
+                }
+
+                # Ctrl+V arriving as a chord or as the raw 0x16 control byte.
+                $isCtrlV = ($key.KeyChar -eq [char]22) -or
+                    (($key.Modifiers -band [ConsoleModifiers]::Control) -and $key.Key -eq [ConsoleKey]::V)
+                if ($isCtrlV) {
+                    $clip = Get-ClipboardText
+                    if ([string]::IsNullOrEmpty($clip)) { continue }
+                    # A credential copied from a web page or a file almost
+                    # always carries a trailing newline. Trimming the ends is
+                    # expected; a newline in the middle means two values were
+                    # copied at once, which is rejected below rather than
+                    # silently joined into one.
+                    if ($clip.Trim() -match '[\r\n]') { $pasteHadNewline = $true }
+                    foreach ($ch in $clip.Trim().ToCharArray()) {
+                        if ([char]::IsControl($ch)) { continue }
+                        [void]$sb.Append($ch)
+                        Write-Host '*' -NoNewline
+                    }
+                    continue
+                }
+
+                # Arrow keys, function keys and any other control character.
+                if ([char]::IsControl($key.KeyChar) -or $key.KeyChar -eq [char]0) { continue }
+
+                [void]$sb.Append($key.KeyChar)
+                Write-Host '*' -NoNewline
+            }
+
+            Write-Host ''
+            $plain = $sb.ToString()
+
+            if ($pasteHadNewline) {
+                Write-Host '    That paste held more than one line. Copy a single value and try again.' -ForegroundColor Yellow
+                continue
+            }
+            if ($plain.Length -eq 0) {
+                if ($Optional) { return '' }
+                Write-Host '    This one is required.' -ForegroundColor Yellow
+                continue
+            }
+            if ($plain -match '\s') {
+                Write-Host '    That value contains a space. Check what was copied and try again.' -ForegroundColor Yellow
+                continue
+            }
+
+            # Length only - never the value itself.
+            Write-Host "    Got $($plain.Length) characters." -ForegroundColor DarkGray
+            return $plain
         }
     }
 
@@ -123,6 +231,41 @@ if (-not $UseExistingConfig) {
     Write-Host '  Press Enter to skip.' -ForegroundColor DarkGray
     $saB64 = Read-Secret 'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (optional)' -Optional
 
+    # Catch a mangled or mis-pasted credential here, where the message can say
+    # which value is wrong, rather than letting the worker fail later with
+    # invalid_client or an invalid authorization header. Only the length and
+    # the shape are ever reported.
+    $problems = @()
+    if ($token.Length -lt 16) {
+        $problems += "MEDIA_WORKER_TOKEN is only $($token.Length) characters - that is too short to be the real token."
+    }
+    if ($clientId -notmatch '\.apps\.googleusercontent\.com$') {
+        $problems += 'GOOGLE_DRIVE_CLIENT_ID does not end in .apps.googleusercontent.com.'
+    }
+    if ($clientSecret.Length -lt 10) {
+        $problems += "GOOGLE_DRIVE_CLIENT_SECRET is only $($clientSecret.Length) characters."
+    }
+    if ($refreshToken.Length -lt 20) {
+        $problems += "GOOGLE_DRIVE_REFRESH_TOKEN is only $($refreshToken.Length) characters."
+    }
+    foreach ($pair in @{ 'MEDIA_WORKER_TOKEN' = $token; 'GOOGLE_DRIVE_CLIENT_ID' = $clientId
+            'GOOGLE_DRIVE_CLIENT_SECRET' = $clientSecret; 'GOOGLE_DRIVE_REFRESH_TOKEN' = $refreshToken
+            'GOOGLE_SERVICE_ACCOUNT_JSON_BASE64' = $saB64
+        }.GetEnumerator()) {
+        if ($pair.Value -and ($pair.Value.ToCharArray() | Where-Object { [char]::IsControl($_) })) {
+            $problems += "$($pair.Key) contains a control character."
+        }
+    }
+
+    if ($problems.Count -gt 0) {
+        Write-Host ''
+        Write-Bad 'These values do not look right, so nothing was written:'
+        foreach ($p in $problems) { Write-Host "    - $p" -ForegroundColor Yellow }
+        Write-Host ''
+        Write-Note 'Run the installer again and re-paste the values.'
+        exit 1
+    }
+
     $lines = @(
         '# AniZora media worker configuration.',
         '# Written by install-worker.ps1. Holds live credentials - do not share.',
@@ -130,10 +273,12 @@ if (-not $UseExistingConfig) {
         "MEDIA_WORKER_TOKEN=$token",
         "GOOGLE_DRIVE_CLIENT_ID=$clientId",
         "GOOGLE_DRIVE_CLIENT_SECRET=$clientSecret",
-        "GOOGLE_DRIVE_REFRESH_TOKEN=$refreshToken",
-        "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$saB64",
-        'MEDIA_WORKER_CONCURRENCY=1'
+        "GOOGLE_DRIVE_REFRESH_TOKEN=$refreshToken"
     )
+    # Only written when there is one: an empty assignment is a valid env line
+    # but makes the file look misconfigured to anyone reading it.
+    if ($saB64) { $lines += "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=$saB64" }
+    $lines += 'MEDIA_WORKER_CONCURRENCY=1'
     # UTF8 without BOM: Docker reads env files byte for byte, and a BOM would
     # become part of the first variable's name.
     [IO.File]::WriteAllLines($EnvFile, $lines, (New-Object Text.UTF8Encoding $false))
