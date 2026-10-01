@@ -34,7 +34,29 @@ export class AdminMediaJobsService {
    */
   private static readonly STALE_CLAIM_MS = 90 * 60 * 1000;
 
+  /**
+   * How long a failed job rests before it is offered again.
+   *
+   * Retrying failures is deliberate — a dropped network or a Drive hiccup
+   * should recover without an admin noticing. But without a wait, a permanent
+   * failure is re-claimed every poll: a missing Drive file had one episode
+   * downloading, failing and re-queueing every 30 seconds for hours, spending
+   * Drive quota and API calls on work that could never succeed. A failure now
+   * waits, so a transient one still heals itself and a permanent one costs
+   * two attempts an hour instead of a hundred.
+   */
+  private static readonly FAILED_RETRY_MS = 15 * 60 * 1000;
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /** A failed job that has waited long enough to be worth another attempt. */
+  private retryableFailure() {
+    return {
+      processingState: MediaProcessingState.FAILED,
+      // updatedAt is set when the failure was recorded.
+      updatedAt: { lt: new Date(Date.now() - AdminMediaJobsService.FAILED_RETRY_MS) },
+    };
+  }
 
   /** Jobs a worker may pick up, oldest episode first so a series fills in order. */
   async pending(limit = 20) {
@@ -42,14 +64,15 @@ export class AdminMediaJobsService {
 
     const rows = await this.prisma.mediaSource.findMany({
       where: {
-        // Two kinds of job. A master is the legacy transcoding one. autoTracks
-        // is the normal one now: the admin supplied the qualities and only the
-        // audio and subtitles need finding.
-        OR: [{ masterDriveFileId: { not: null } }, { autoTracks: true }],
-        processingState: { in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED] },
-        // An archived episode is not worth the work. FAILED jobs are retried on
-        // every poll, so without this an archived failure would loop forever on
-        // content nobody can watch.
+        AND: [
+          // Two kinds of job. A master is the legacy transcoding one. autoTracks
+          // is the normal one now: the admin supplied the qualities and only the
+          // audio and subtitles need finding.
+          { OR: [{ masterDriveFileId: { not: null } }, { autoTracks: true }] },
+          { OR: [{ processingState: MediaProcessingState.PENDING }, this.retryableFailure()] },
+        ],
+        // An archived episode is not worth the work: a failure on content
+        // nobody can watch would be retried for as long as it existed.
         episode: { deletedAt: null },
       },
       orderBy: [{ episode: { animeId: 'asc' } }, { episode: { number: 'asc' } }],
@@ -97,8 +120,12 @@ export class AdminMediaJobsService {
     const claimed = await this.prisma.mediaSource.updateMany({
       where: {
         id,
-        OR: [{ masterDriveFileId: { not: null } }, { autoTracks: true }],
-        processingState: { in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED] },
+        AND: [
+          { OR: [{ masterDriveFileId: { not: null } }, { autoTracks: true }] },
+          // The same cooldown as the queue, so a worker holding an id from an
+          // earlier poll cannot re-enter a failure loop by claiming directly.
+          { OR: [{ processingState: MediaProcessingState.PENDING }, this.retryableFailure()] },
+        ],
       },
       data: { processingState: MediaProcessingState.PROCESSING, processingError: null, updatedAt: new Date() },
     });

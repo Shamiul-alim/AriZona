@@ -36,10 +36,10 @@ describe('AdminMediaJobsService', () => {
       await service(prisma).pending();
 
       const { where } = prisma.mediaSource.findMany.mock.calls[0][0];
-      expect(where.OR).toEqual([{ masterDriveFileId: { not: null } }, { autoTracks: true }]);
-      expect(where.processingState).toEqual({
-        in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED],
-      });
+      expect(where.AND[0].OR).toEqual([{ masterDriveFileId: { not: null } }, { autoTracks: true }]);
+      const states = where.AND[1].OR;
+      expect(states[0]).toEqual({ processingState: MediaProcessingState.PENDING });
+      expect(states[1].processingState).toBe(MediaProcessingState.FAILED);
       // Without this an archived episode whose job failed would be retried on
       // every poll, forever, on content nobody can watch.
       expect(where.episode).toEqual({ deletedAt: null });
@@ -79,12 +79,23 @@ describe('AdminMediaJobsService', () => {
       const prisma = prismaDouble();
       await service(prisma).claim('source-1');
       const { where, data } = prisma.mediaSource.updateMany.mock.calls.at(-1)![0];
-      expect(where.OR).toEqual([{ masterDriveFileId: { not: null } }, { autoTracks: true }]);
-      expect(where.processingState).toEqual({
-        in: [MediaProcessingState.PENDING, MediaProcessingState.FAILED],
-      });
+      expect(where.AND[0].OR).toEqual([{ masterDriveFileId: { not: null } }, { autoTracks: true }]);
+      const claimable = where.AND[1].OR;
+      expect(claimable[0]).toEqual({ processingState: MediaProcessingState.PENDING });
+      expect(claimable[1].processingState).toBe(MediaProcessingState.FAILED);
       expect(data.processingState).toBe(MediaProcessingState.PROCESSING);
       expect(data.processingError).toBeNull();
+    });
+
+    it('makes a failed job wait before it can be claimed again', async () => {
+      // A missing Drive file had one episode failing and re-queueing every 30
+      // seconds for hours. A failure has to rest, or "retry" is a hot loop.
+      const prisma = prismaDouble();
+      await service(prisma).claim('source-1');
+      const { where } = prisma.mediaSource.updateMany.mock.calls.at(-1)![0];
+      const failed = where.AND[1].OR[1];
+      expect(failed.processingState).toBe(MediaProcessingState.FAILED);
+      expect(failed.updatedAt.lt.getTime()).toBeLessThanOrEqual(Date.now() - 15 * 60 * 1000);
     });
   });
 
