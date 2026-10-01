@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { qs } from '@/lib/api';
 import { authFetch } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
+import { autoTracksForMode, mediaModeFromSource, type MediaMode } from '@/lib/media-mode';
 import { MediaProcessingStatus } from './MediaProcessingStatus';
 import { MasterSourceField } from './MasterSourceField';
 import { UploadButton } from './VideoUpload';
@@ -56,16 +57,26 @@ interface SourceDraft {
   mediaMode: MediaMode;
   masterDriveFileIdOrUrl: string;
   /**
-   * Read the audio and subtitle streams out of one of the supplied qualities.
-   * The video is never touched — the files the admin uploads are the variants.
+   * Which quality to read the tracks from, in AUTO_TRACKS. Empty means the
+   * highest available, which is what it should normally be left on.
    */
-  autoTracks: boolean;
-  /** Which quality to read them from. Empty means the highest available. */
   trackSourceQuality: string;
   variants: VariantDraft[];
 }
 
-type MediaMode = 'SINGLE_MASTER' | 'MANUAL_VARIANTS';
+/** The modes a new source may be created in, in the order they are shown. */
+const SELECTABLE_MEDIA_MODES = [
+  {
+    key: 'FULL_MANUAL',
+    label: 'Full manual',
+    hint: 'You supply the video, audio and subtitles. Nothing is processed.',
+  },
+  {
+    key: 'AUTO_TRACKS',
+    label: 'Manual qualities + auto tracks',
+    hint: 'You supply each quality; audio and subtitles are detected for you.',
+  },
+] as const;
 
 interface SubtitleDraft {
   language: string;
@@ -141,8 +152,7 @@ function newSource(index: number): SourceDraft {
     hlsUrl: '',
     embedUrl: '',
     isDefault: index === 0,
-    mediaMode: 'MANUAL_VARIANTS',
-    autoTracks: true,
+    mediaMode: 'AUTO_TRACKS',
     trackSourceQuality: '',
     masterDriveFileIdOrUrl: '',
     variants: [{ quality: 'Q_1080P', driveFileIdOrUrl: '', directUrl: '', isDefault: false }],
@@ -247,11 +257,12 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                 hlsUrl: String(source.hlsUrl ?? ''),
                 embedUrl: String(source.embedUrl ?? ''),
                 isDefault: Boolean(source.isDefault),
-                // A stored master means the worker built this source.
-                mediaMode: source.masterDriveFileId ? 'SINGLE_MASTER' : 'MANUAL_VARIANTS',
-                // Off for anything saved before this existed, so a source with
-                // hand-entered tracks is never quietly rewritten by a worker.
-                autoTracks: Boolean(source.autoTracks ?? false),
+                // A stored master means the worker built this source the old
+                // way. Otherwise the stored autoTracks flag is what separates
+                // the two manual modes — and it is false for everything saved
+                // before auto tracks existed, so a source with hand-entered
+                // tracks loads as Full manual and is never quietly rewritten.
+                mediaMode: mediaModeFromSource(source),
                 trackSourceQuality: String(source.trackSourceQuality ?? ''),
                 masterDriveFileIdOrUrl: String(source.masterDriveFileId ?? ''),
                 variants: ((source.variants as Array<Record<string, unknown>>) ?? []).map((v) => ({
@@ -369,11 +380,13 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
         isDefault: source.isDefault,
         masterDriveFileIdOrUrl:
           source.mediaMode === 'SINGLE_MASTER' ? source.masterDriveFileIdOrUrl.trim() : undefined,
-        // Track detection belongs to the manual path. A master already yields
-        // its own tracks as part of being processed.
-        autoTracks: source.mediaMode === 'MANUAL_VARIANTS' ? source.autoTracks : undefined,
+        // The mode is the only thing that decides this. Full manual sends an
+        // explicit false rather than undefined: switching a source back from
+        // auto tracks has to clear the flag, and omitting the field would
+        // leave the stored true in place and keep queueing jobs.
+        autoTracks: autoTracksForMode(source.mediaMode),
         trackSourceQuality:
-          source.mediaMode === 'MANUAL_VARIANTS' && source.trackSourceQuality
+          source.mediaMode === 'AUTO_TRACKS' && source.trackSourceQuality
             ? source.trackSourceQuality
             : undefined,
         // With a master the worker owns the renditions; sending hand-typed ones
@@ -737,28 +750,31 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                       </label>
                     ) : null}
 
-                    {/* SINGLE_MASTER vs MANUAL_VARIANTS. The mode is explicit
+                    {/* Full manual vs auto tracks. The mode is explicit
                         state: choosing it and supplying the master are two separate
                         steps, so the mode can be picked before any URL exists. */}
                     {providerMeta?.needsVariants ? (
                       <div className="mt-3 rounded-lg border border-line-soft bg-base/50 p-3">
-                        <Label hint="You supply the video qualities. Audio and subtitles are found for you.">
-                          Media mode
+                        <Label hint="Your video qualities are always used exactly as supplied.">
+                          Media setup
                         </Label>
                         <div className="mt-1.5 flex flex-wrap gap-2">
                           {(
-                            [
-                              {
-                                key: 'MANUAL_VARIANTS',
-                                label: 'Manual qualities + auto tracks',
-                                hint: 'You supply each quality; audio and subtitles are detected',
-                              },
-                              {
-                                key: 'SINGLE_MASTER',
-                                label: 'Auto master (legacy)',
-                                hint: 'One file, transcoded into every quality — slow',
-                              },
-                            ] as const
+                            // The legacy transcoding mode is not an option an
+                            // admin can pick any more. It stays in the list
+                            // only while editing a source that already uses
+                            // it, so such an episode remains editable instead
+                            // of silently changing mode on its next save.
+                            source.mediaMode === 'SINGLE_MASTER'
+                              ? [
+                                  ...SELECTABLE_MEDIA_MODES,
+                                  {
+                                    key: 'SINGLE_MASTER',
+                                    label: 'Auto master (legacy)',
+                                    hint: 'Retired. One file transcoded into every quality — slow.',
+                                  } as const,
+                                ]
+                              : SELECTABLE_MEDIA_MODES
                           ).map((mode) => {
                             const active = source.mediaMode === mode.key;
                             return (
@@ -794,55 +810,46 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                               onChange={(master) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: master })}
                             />
                           </>
+                        ) : source.mediaMode === 'FULL_MANUAL' ? (
+                          <p className="mt-2 rounded-lg bg-base px-3 py-2 text-[11.5px] leading-relaxed text-ink-faint">
+                            Nothing is processed. The video qualities, audio tracks and subtitles you enter below
+                            are exactly what the player uses.
+                          </p>
                         ) : (
                           <div className="mt-3 border-t border-line-soft pt-3">
-                            <label className="flex cursor-pointer items-start gap-2">
-                              <input
-                                type="checkbox"
-                                checked={source.autoTracks}
-                                onChange={(e) => updateSource(sourceIndex, { autoTracks: e.target.checked })}
-                                className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-brand)]"
-                              />
-                              <span>
-                                <span className="block text-[12.5px] font-semibold text-ink">
-                                  Find audio and subtitles automatically
-                                </span>
-                                <span className="block text-[11.5px] leading-relaxed text-ink-faint">
-                                  Reads the streams out of one of your files and adds them to the player. Your video
-                                  is never re-encoded.
-                                </span>
-                              </span>
-                            </label>
+                            <p className="rounded-lg bg-base px-3 py-2 text-[11.5px] leading-relaxed text-ink-faint">
+                              Your video qualities are used exactly as supplied. AniZora automatically detects
+                              audio and text subtitles from the highest available quality. Your files are never
+                              re-encoded.
+                            </p>
 
-                            {source.autoTracks ? (
-                              <label className="mt-3 block max-w-64">
-                                <Label hint="Leave on Auto unless one particular file has the full set of streams.">
-                                  Track source
-                                </Label>
-                                <select
-                                  value={source.trackSourceQuality}
-                                  onChange={(e) =>
-                                    updateSource(sourceIndex, { trackSourceQuality: e.target.value })
-                                  }
-                                  className={adminSelect}
-                                >
-                                  <option value="">Auto — highest available</option>
-                                  {source.variants
-                                    .filter((v) => v.driveFileIdOrUrl.trim() || v.directUrl.trim())
-                                    .map((v) => (
-                                      <option key={v.quality} value={v.quality}>
-                                        {QUALITY_LABELS[v.quality] ?? v.quality}
-                                      </option>
-                                    ))}
-                                </select>
-                              </label>
-                            ) : null}
+                            <label className="mt-3 block max-w-64">
+                              <Label hint="Leave on Auto unless one particular file has the full set of streams.">
+                                Track source
+                              </Label>
+                              <select
+                                value={source.trackSourceQuality}
+                                onChange={(e) =>
+                                  updateSource(sourceIndex, { trackSourceQuality: e.target.value })
+                                }
+                                className={adminSelect}
+                              >
+                                <option value="">Auto — highest available</option>
+                                {source.variants
+                                  .filter((v) => v.driveFileIdOrUrl.trim() || v.directUrl.trim())
+                                  .map((v) => (
+                                    <option key={v.quality} value={v.quality}>
+                                      {QUALITY_LABELS[v.quality] ?? v.quality}
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
                           </div>
                         )}
                       </div>
                     ) : null}
 
-                    {providerMeta?.needsVariants && source.mediaMode === 'MANUAL_VARIANTS' ? (
+                    {providerMeta?.needsVariants && source.mediaMode !== 'SINGLE_MASTER' ? (
                       <div className="mt-3">
                         <div className="mb-2 flex items-center justify-between">
                           <Label hint="Each quality is a separate file for this provider. That is what makes quality switching work.">
