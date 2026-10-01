@@ -134,10 +134,17 @@ export class RegisterMediaDto {
   @Type(() => ProducedVariantDto)
   variants!: ProducedVariantDto[];
 
+  // These caps exist to bound a malformed request, not to describe real
+  // content, and the first real multi-language release tested against them was
+  // rejected: a 1080p episode carrying 13 text subtitle streams failed
+  // registration on "no more than 12 elements" after the worker had already
+  // downloaded the file and converted every track. A limit that a normal
+  // episode trips is a limit in the wrong place, so they now sit well above
+  // what a release plausibly carries while still refusing the absurd.
   @ApiPropertyOptional({ type: [ProducedAudioDto] })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(12)
+  @ArrayMaxSize(24)
   @ValidateNested({ each: true })
   @Type(() => ProducedAudioDto)
   audioTracks?: ProducedAudioDto[];
@@ -145,7 +152,7 @@ export class RegisterMediaDto {
   @ApiPropertyOptional({ type: [ProducedSubtitleDto] })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(12)
+  @ArrayMaxSize(48)
   @ValidateNested({ each: true })
   @Type(() => ProducedSubtitleDto)
   subtitleTracks?: ProducedSubtitleDto[];

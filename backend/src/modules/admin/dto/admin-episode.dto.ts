@@ -439,10 +439,13 @@ export class CreateEpisodeDto {
   @Type(() => EpisodeAudioTrackDto)
   audioTracks?: EpisodeAudioTrackDto[];
 
+  // Matches the cap the worker registers against. Detection finding more
+  // subtitles than an admin is then allowed to re-save would make an episode
+  // uneditable through the form that created it.
   @ApiPropertyOptional({ type: [SubtitleTrackDto], description: 'Applies to every source of the episode' })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(20)
+  @ArrayMaxSize(48)
   @ValidateNested({ each: true })
   @Type(() => SubtitleTrackDto)
   subtitleTracks?: SubtitleTrackDto[];
