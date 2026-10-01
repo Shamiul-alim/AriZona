@@ -454,6 +454,10 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
     }
   };
 
+  // Any source asking for automatic tracks means the worker owns the audio and
+  // subtitle lists for this episode, so the manual forms are hidden.
+  const autoTracksMode = sources.some((source) => source.mediaMode === 'AUTO_TRACKS');
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -972,6 +976,18 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
             </div>
           </Card>
 
+          {/* In auto-tracks mode the worker writes both of these, so offering
+              the manual forms as well invites an admin to hand-enter tracks
+              that are about to be replaced. */}
+          {autoTracksMode ? (
+            <Card title="Audio and subtitles" description="Found for you from the video you supplied.">
+              <p className="text-[12.5px] leading-relaxed text-ink-faint">
+                Audio and subtitles are detected automatically from the highest available video quality after you
+                save. Nothing to fill in here.
+              </p>
+            </Card>
+          ) : (
+            <>
           <Card
             title="Audio Tracks"
             description="Separate audio files (for example a Japanese original and an English dub) played in sync with the video. Viewers switch between them from the player's Audio menu without the video restarting. Leave empty if each source already carries its own audio."
@@ -1196,6 +1212,8 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
               </Button>
             </div>
           </Card>
+            </>
+          )}
 
           <Card
             title="Downloads"

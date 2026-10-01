@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { pipeline } from 'node:stream/promises';
 import { ApiExcludeController, ApiOperation } from '@nestjs/swagger';
 import { Public } from 'src/common/decorators';
 import { AdminMediaJobsService } from './admin-media-jobs.service';
@@ -40,6 +42,49 @@ export class MediaWorkerController {
   @ApiOperation({ summary: 'Report that this worker is listening' })
   heartbeat(@Body() dto: WorkerHeartbeatDto) {
     return this.presence.record(dto);
+  }
+
+  /**
+   * The bytes of the file this job reads its tracks from.
+   *
+   * A worker normally opens the file in Drive itself. It cannot when the admin
+   * pasted a link to a file they created: a credential scoped to the app's own
+   * files gets 404 on it, however valid the link. This API can read it — it has
+   * to, or the episode would not play — so the worker falls back to here
+   * instead of the deployment needing a worker credential with read access to
+   * someone's whole Drive.
+   *
+   * Scoped to this job's own track source, so the token cannot be used to pull
+   * an arbitrary Drive file through the API.
+   */
+  @Get('jobs/:id/source')
+  @ApiOperation({ summary: "Stream the file a track job reads, for a worker that cannot open it directly" })
+  async trackSource(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const controller = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+
+    try {
+      const result = await this.jobs.openTrackSourceStream(id, {
+        range: req.headers.range,
+        signal: controller.signal,
+      });
+      res.status(result.status);
+      for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
+      await pipeline(result.stream, res);
+    } catch (error) {
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      const status = (error as { status?: number }).status ?? 500;
+      res.status(status).json({ statusCode: status, message: (error as Error).message });
+    }
   }
 
   @Get('jobs')

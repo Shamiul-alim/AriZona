@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MediaProcessingState, VideoQuality } from '@prisma/client';
 import { AdminMediaJobsService } from './admin-media-jobs.service';
 import type { PrismaService } from 'src/prisma/prisma.service';
+import type { MediaProviderRegistry } from '../media/media-provider.registry';
 
 /**
  * The queue's contract, which the worker depends on but cannot enforce: only
@@ -26,7 +27,13 @@ function prismaDouble(overrides: Record<string, unknown> = {}) {
 }
 
 function service(prisma: ReturnType<typeof prismaDouble>) {
-  return new AdminMediaJobsService(prisma as unknown as PrismaService);
+  // The provider registry is only reached when serving source bytes, which
+  // these tests do not exercise.
+  const providers = { get: jest.fn().mockReturnValue(null) };
+  return new AdminMediaJobsService(
+    prisma as unknown as PrismaService,
+    providers as unknown as MediaProviderRegistry,
+  );
 }
 
 describe('AdminMediaJobsService', () => {

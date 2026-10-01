@@ -21,7 +21,14 @@ describe('AdminEpisodesService season assignment', () => {
         update: jest.fn().mockResolvedValue({ id: 'ep-1' }),
       },
     };
-    const service = new AdminEpisodesService(prisma as never, { refreshCounters: jest.fn() } as never);
+    // No Drive provider configured in these tests, so save-time source
+    // validation is skipped rather than reaching the network.
+    const providers = { get: jest.fn().mockReturnValue(null) };
+    const service = new AdminEpisodesService(
+      prisma as never,
+      { refreshCounters: jest.fn() } as never,
+      providers as never,
+    );
     return { service, prisma };
   }
 

@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { MediaProcessingState, VideoQuality } from '@prisma/client';
+import { MediaProcessingState, MediaProvider, VideoQuality } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { MediaProviderRegistry } from '../media/media-provider.registry';
+import { pickTrackSource, qualityLabel } from '../media/probe';
+import type { OpenStreamOptions, MediaStreamResult } from '../media/providers/media-provider.interface';
 
 /** What a worker reports having produced. Mirrors RegisterMediaDto. */
 export interface RegisterProducedMedia {
@@ -47,7 +50,63 @@ export class AdminMediaJobsService {
    */
   private static readonly FAILED_RETRY_MS = 15 * 60 * 1000;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly providers: MediaProviderRegistry,
+  ) {}
+
+  /**
+   * The quality a track job will actually read, and its stored file id.
+   *
+   * The worker makes the same choice from the same data; this exists so the API
+   * can answer "which file is this job going to open?" without asking a worker,
+   * which is what both save-time validation and serving the bytes need.
+   */
+  private async trackSource(sourceId: string) {
+    const source = await this.prisma.mediaSource.findUnique({
+      where: { id: sourceId },
+      select: {
+        id: true,
+        autoTracks: true,
+        provider: true,
+        trackSourceQuality: true,
+        variants: { select: { quality: true, driveFileId: true, directUrl: true, isActive: true } },
+      },
+    });
+    if (!source) throw new NotFoundException('Media source not found');
+
+    const picked = pickTrackSource(
+      source.variants.map((v) => ({ quality: v.quality, driveFileId: v.driveFileId, isActive: v.isActive })),
+      source.trackSourceQuality,
+    );
+    if (!picked?.driveFileId) {
+      throw new BadRequestException('This source has no quality file to read tracks from');
+    }
+    const variant = source.variants.find((v) => v.quality === picked.quality);
+    return { source, quality: picked.quality, driveFileId: picked.driveFileId, directUrl: variant?.directUrl ?? null };
+  }
+
+  /**
+   * Streams the file a track job reads, for a worker whose own Drive credential
+   * cannot open it.
+   *
+   * A pasted Drive link belongs to the administrator, not to AniZora, so a
+   * worker credential scoped to its own files gets 404 on it however valid the
+   * link is. The API can already read that file — it has to, or the episode
+   * would not play — so it hands the bytes over rather than requiring the
+   * worker to hold read authority over the whole of someone's Drive.
+   *
+   * Only ever the file this job is going to read: not an arbitrary file id.
+   */
+  async openTrackSourceStream(sourceId: string, options: OpenStreamOptions): Promise<MediaStreamResult> {
+    const { source, driveFileId, directUrl } = await this.trackSource(sourceId);
+    const adapter = this.providers.get(source.provider);
+    if (!adapter) throw new NotFoundException(`Provider ${source.provider} cannot serve files`);
+    if (!adapter.isConfigured()) {
+      throw new NotFoundException(`The ${source.provider} provider is not configured on this server`);
+    }
+    return adapter.openStream({ driveFileId, directUrl, mimeType: 'video/mp4' }, options);
+  }
 
   /** A failed job that has waited long enough to be worth another attempt. */
   private retryableFailure() {

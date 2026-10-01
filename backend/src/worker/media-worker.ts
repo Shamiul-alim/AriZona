@@ -25,6 +25,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { google } from 'googleapis';
 import {
   audioExtractionArgs,
@@ -351,29 +352,82 @@ async function upload(drive: Drive, parent: string, filePath: string, name: stri
   return id;
 }
 
-async function downloadDriveFile(fileId: string, dest: string): Promise<void> {
-  const drive = readClient();
-  const meta = await drive.files.get({ fileId, fields: 'size,name', supportsAllDrives: true });
-  const expected = Number(meta.data.size ?? 0);
+/**
+ * Whether Drive is saying "you have no grant for this file" rather than
+ * anything about the file itself.
+ *
+ * Drive answers 404 for a file outside a per-file (drive.file) grant even when
+ * the file exists and the same account owns it, so notFound here is not
+ * evidence that the id is wrong.
+ */
+function isAccessRefusal(error: unknown): boolean {
+  const status = (error as { code?: number; status?: number }).code ?? (error as { status?: number }).status;
+  return status === 404 || status === 403;
+}
 
-  if (fs.existsSync(dest) && expected > 0 && fs.statSync(dest).size === expected) {
-    step('download', `cached (${MB(expected)} MB)`);
+/**
+ * Downloads the file a job reads its tracks from.
+ *
+ * Tries Drive directly, which is the cheap path and the only one for a file
+ * this worker uploaded itself. An administrator's own pasted link is a
+ * different matter: a worker credential scoped to its own files cannot open it,
+ * so the bytes come from the API instead, which can already read it because
+ * playback depends on that. The alternative would be giving every worker read
+ * access to the whole of someone's Drive.
+ */
+async function downloadTrackSource(jobId: string, fileId: string, dest: string): Promise<void> {
+  const drive = readClient();
+  let expected = 0;
+  try {
+    const meta = await drive.files.get({ fileId, fields: 'size,name', supportsAllDrives: true });
+    expected = Number(meta.data.size ?? 0);
+
+    if (fs.existsSync(dest) && expected > 0 && fs.statSync(dest).size === expected) {
+      step('download', `cached (${MB(expected)} MB)`);
+      return;
+    }
+
+    const res = await drive.files.get({ fileId, alt: 'media', supportsAllDrives: true }, { responseType: 'stream' });
+    await new Promise<void>((resolve, reject) => {
+      const out = fs.createWriteStream(dest);
+      (res.data as NodeJS.ReadableStream).on('error', reject).pipe(out).on('finish', resolve).on('error', reject);
+    });
+  } catch (error) {
+    if (!isAccessRefusal(error)) throw error;
+    step('download', 'not readable with this worker credential — asking AniZora for it');
+    await downloadViaApi(jobId, dest);
     return;
   }
 
-  const res = await drive.files.get({ fileId, alt: 'media', supportsAllDrives: true }, { responseType: 'stream' });
-  await new Promise<void>((resolve, reject) => {
-    const out = fs.createWriteStream(dest);
-    (res.data as NodeJS.ReadableStream).on('error', reject).pipe(out).on('finish', resolve).on('error', reject);
-  });
-
-  // A truncated download is indistinguishable from a corrupt master later on.
+  // A truncated download is indistinguishable from a corrupt source later on.
   const got = fs.statSync(dest).size;
   if (expected > 0 && got !== expected) {
     fs.rmSync(dest, { force: true });
     throw new Error(`Download incomplete: expected ${expected} bytes, got ${got}`);
   }
   step('download', `${MB(got)} MB`);
+}
+
+/** The same bytes, proxied by the API, for a source this worker cannot open. */
+async function downloadViaApi(jobId: string, dest: string): Promise<void> {
+  const res = await fetch(`${API}/media-worker/jobs/${jobId}/source`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Could not read the track source through AniZora -> ${res.status} ${text.slice(0, 200)}`);
+  }
+  const expected = Number(res.headers.get('content-length') ?? 0);
+  await new Promise<void>((resolve, reject) => {
+    const out = fs.createWriteStream(dest);
+    Readable.fromWeb(res.body as never).on('error', reject).pipe(out).on('finish', resolve).on('error', reject);
+  });
+  const got = fs.statSync(dest).size;
+  if (expected > 0 && got !== expected) {
+    fs.rmSync(dest, { force: true });
+    throw new Error(`Download incomplete: expected ${expected} bytes, got ${got}`);
+  }
+  step('download', `${MB(got)} MB (via AniZora)`);
 }
 
 // --- encoding ---------------------------------------------------------------
@@ -605,6 +659,26 @@ async function buildTracks(
   return { audioTracks, subtitleTracks };
 }
 
+/**
+ * The scopes the OAuth refresh token was actually granted, or null if that
+ * cannot be determined. Used to describe the credential's reach, never printed
+ * with the token itself.
+ */
+async function grantedScopes(): Promise<string[] | null> {
+  try {
+    const auth = new google.auth.OAuth2(required('GOOGLE_DRIVE_CLIENT_ID'), required('GOOGLE_DRIVE_CLIENT_SECRET'));
+    auth.setCredentials({ refresh_token: required('GOOGLE_DRIVE_REFRESH_TOKEN') });
+    const { token } = await auth.getAccessToken();
+    if (!token) return null;
+    const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
+    if (!res.ok) return null;
+    const info = (await res.json()) as { scope?: string };
+    return info.scope ? info.scope.split(/\s+/).filter(Boolean) : [];
+  } catch {
+    return null;
+  }
+}
+
 // --- one job ----------------------------------------------------------------
 
 async function processJob(job: Job): Promise<void> {
@@ -651,7 +725,7 @@ async function processJob(job: Job): Promise<void> {
 
     await progress(job.id, 'DOWNLOADING_SOURCE', sourceDescription);
     const sourcePath = path.join(jobDir, 'source');
-    await downloadDriveFile(sourceFileId, sourcePath);
+    await downloadTrackSource(job.id, sourceFileId, sourcePath);
 
     await progress(job.id, 'PROBING');
     const summary = await probeMedia(sourcePath);
@@ -768,7 +842,16 @@ async function preflight(): Promise<void> {
   });
   await check('Drive (read video)', async () => {
     await readClient().files.list({ pageSize: 1, fields: 'files(id)' });
-    return serviceAccountCredentials() ? 'can read (service account)' : 'can read';
+    if (serviceAccountCredentials()) return 'can read (service account)';
+    // files.list succeeds even on a credential that can only see files this
+    // app created, which is how a worker that could not open a single pasted
+    // link still reported a healthy Drive. Say which kind of reach it has.
+    const scopes = await grantedScopes();
+    if (scopes === null) return 'can read (scope unknown)';
+    const anyFile = scopes.some((scope) => scope.endsWith('/auth/drive') || scope.endsWith('/auth/drive.readonly'));
+    return anyFile
+      ? 'can read any file this account can see'
+      : 'own files only — a pasted Drive link is read through AniZora instead';
   });
   await check('Drive (write tracks)', async () => {
     const drive = uploadClient();

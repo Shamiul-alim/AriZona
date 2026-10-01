@@ -3,6 +3,8 @@ import { MediaProvider, Prisma, PublishStatus, SubtitleFormat, MediaProcessingSt
 import { paginate } from 'src/common/dto/pagination.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { GoogleDriveProvider } from '../media/providers/google-drive.provider';
+import { MediaProviderRegistry } from '../media/media-provider.registry';
+import { pickTrackSource, qualityLabel } from '../media/probe';
 import { AdminAnimeService } from './admin-anime.service';
 import {
   CreateEpisodeDto,
@@ -17,7 +19,64 @@ export class AdminEpisodesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly animeService: AdminAnimeService,
+    private readonly providers: MediaProviderRegistry,
   ) {}
+
+  /**
+   * Fails the save when a source asking for automatic tracks points at a file
+   * AniZora cannot open.
+   *
+   * Without this the admin learns about an unreadable link minutes later, from
+   * a worker that has already queued, claimed and failed the job, and the
+   * message it leaves is Drive's bare "File not found" — which is also what
+   * Drive says about a file that exists but was never shared, so it reads as
+   * though the link were wrong. Checking here says which quality and why,
+   * before anything is stored.
+   *
+   * The check uses the API's own Drive credential, which is the one that ends
+   * up reading the file: the worker falls back to this service for a source it
+   * cannot open itself.
+   */
+  private async assertTrackSourcesReadable(dto: CreateEpisodeDto | UpdateEpisodeDto): Promise<void> {
+    for (const source of dto.mediaSources ?? []) {
+      if (source.autoTracks !== true) continue;
+      if (source.provider !== MediaProvider.GOOGLE_DRIVE) continue;
+
+      const candidates = (source.variants ?? []).map((v) => ({
+        quality: v.quality,
+        driveFileId: v.driveFileIdOrUrl ? GoogleDriveProvider.extractFileId(v.driveFileIdOrUrl) : null,
+        isActive: v.isActive ?? true,
+      }));
+      const picked = pickTrackSource(candidates, source.trackSourceQuality ?? null);
+      if (!picked?.driveFileId) continue; // Nothing to read yet; saving that is allowed.
+
+      const adapter = this.providers.get(MediaProvider.GOOGLE_DRIVE);
+      if (!adapter?.isConfigured()) continue; // Not our failure to report here.
+
+      const where = `The ${qualityLabel(picked.quality)} file`;
+      try {
+        await adapter.probe({ driveFileId: picked.driveFileId, mimeType: 'video/mp4' });
+      } catch (error) {
+        const status = (error as { code?: number; status?: number }).code ?? (error as { status?: number }).status;
+        if (status === 404) {
+          throw new BadRequestException(
+            `${where} is not accessible to AniZora. Drive answers "not found" both for a file that does not ` +
+              `exist and for one the credential has no grant for, so check the ID is right and that the file is ` +
+              `shared with the account AniZora uses.`,
+          );
+        }
+        if (status === 403) {
+          throw new BadRequestException(
+            `${where} exists but Drive refused access to it. Check the sharing on the file, or whether its ` +
+              `download quota has been exceeded.`,
+          );
+        }
+        throw new BadRequestException(
+          `${where} could not be read from Drive: ${(error as Error).message}`,
+        );
+      }
+    }
+  }
 
   async list(animeId: string | undefined, page: number, limit: number, search?: string) {
     const where: Prisma.EpisodeWhereInput = {
@@ -169,6 +228,10 @@ export class AdminEpisodesService {
    * so the rebuild is clean and cannot leave orphans.
    */
   private async replaceMedia(episodeId: string, dto: CreateEpisodeDto | UpdateEpisodeDto) {
+    // Before anything is written: a source that asks for automatic tracks has
+    // to point at a file we can actually open.
+    await this.assertTrackSourcesReadable(dto);
+
     await this.prisma.$transaction(
       async (tx) => {
       if (dto.mediaSources) {
