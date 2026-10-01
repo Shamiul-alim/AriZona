@@ -5,6 +5,8 @@ import {
   qualityLabel,
   subtitleExtractionArgs,
   VIDEO_ENCODING_FLAGS,
+  distinguish,
+  alreadyBuilt,
 } from './probe';
 
 const variant = (quality: string, driveFileId: string | null = 'file-' + quality, isActive = true) => ({
@@ -124,5 +126,54 @@ describe('extraction never touches the video', () => {
     expect(args).toContain(hostile);
     expect(args.join(' ')).toContain(hostile);
     expect(args.filter((a) => a === hostile)).toHaveLength(1);
+  });
+});
+
+describe('telling same-language streams apart', () => {
+  it('leaves a single stream of a language on the bare slug', () => {
+    const seen = new Map<string, number>();
+    expect(distinguish('eng', 'English', seen)).toEqual({ slug: 'eng', label: 'English' });
+  });
+
+  it('numbers the second stream of a language instead of reusing the first', () => {
+    // Solo Leveling S1E3 carries two English and two Spanish subtitle streams
+    // with different content. Keyed on the language alone, the second found the
+    // first one's uploaded file and served it twice.
+    const seen = new Map<string, number>();
+    expect(distinguish('eng', 'English', seen).slug).toBe('eng');
+    expect(distinguish('eng', 'English', seen)).toEqual({ slug: 'eng-2', label: 'English 2' });
+    expect(distinguish('spa', 'Spanish', seen).slug).toBe('spa');
+    expect(distinguish('spa', 'Spanish', seen).slug).toBe('spa-2');
+    expect(distinguish('eng', 'English', seen).slug).toBe('eng-3');
+  });
+
+  it('keeps distinct languages independent', () => {
+    const seen = new Map<string, number>();
+    expect(distinguish('hin', 'Hindi', seen).slug).toBe('hin');
+    expect(distinguish('jpn', 'Japanese', seen).slug).toBe('jpn');
+    expect(distinguish('hin', 'Hindi', seen).slug).toBe('hin-2');
+  });
+});
+
+describe('alreadyBuilt', () => {
+  it('keys existing uploads the same way they were named', () => {
+    const built = alreadyBuilt([
+      { language: 'eng', driveFileId: 'file-eng-1' },
+      { language: 'ara', driveFileId: 'file-ara' },
+      { language: 'eng', driveFileId: 'file-eng-2' },
+    ]);
+    // Each English stream must resolve to its own file, not the first one.
+    expect(built.get('eng')).toBe('file-eng-1');
+    expect(built.get('eng-2')).toBe('file-eng-2');
+    expect(built.get('ara')).toBe('file-ara');
+  });
+
+  it('skips a track that has no file yet without shifting the others', () => {
+    const built = alreadyBuilt([
+      { language: 'eng', driveFileId: null },
+      { language: 'eng', driveFileId: 'file-eng-2' },
+    ]);
+    expect(built.has('eng')).toBe(false);
+    expect(built.get('eng-2')).toBe('file-eng-2');
   });
 });

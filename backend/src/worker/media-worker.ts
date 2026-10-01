@@ -36,6 +36,8 @@ import {
   summariseMaster,
   type MasterSummary,
   type ProbeResult,
+  distinguish,
+  alreadyBuilt,
 } from '../modules/media/probe';
 
 // --- configuration ----------------------------------------------------------
@@ -531,29 +533,31 @@ async function buildTracks(
   renditions: string,
 ): Promise<BuiltTracks> {
   // --- audio ----------------------------------------------------------------
-  const knownAudio = new Map(job.audioTracks.filter((a) => a.driveFileId).map((a) => [a.language, a.driveFileId!]));
+  const knownAudio = alreadyBuilt(job.audioTracks);
   const audioTracks: BuiltTracks['audioTracks'] = [];
 
   if (summary.audio.length > 1) {
     await progress(job.id, 'DETECTING_AUDIO', `${summary.audio.length} tracks`);
+    const audioPerLanguage = new Map<string, number>();
     for (const [position, stream] of summary.audio.entries()) {
       if (stopping) throw new Error('Stopped before this audio track was built');
-      const key = stream.language ?? `track${position + 1}`;
-      const name = `${base}-${key}.m4a`;
-      const already = knownAudio.get(key) ?? (await existingUpload(drive, renditions, name));
+      const language = stream.language ?? `track${position + 1}`;
+      const { slug, label } = distinguish(language, stream.label, audioPerLanguage);
+      const name = `${base}-${slug}.m4a`;
+      const already = knownAudio.get(slug) ?? (await existingUpload(drive, renditions, name));
       if (already) {
-        step(`audio ${position + 1}`, `${stream.label} (reused)`);
-        audioTracks.push({ language: key, label: stream.label, driveFileId: already, isDefault: stream.isDefault, sortOrder: position });
+        step(`audio ${position + 1}`, `${label} (reused)`);
+        audioTracks.push({ language, label, driveFileId: already, isDefault: stream.isDefault, sortOrder: position });
         continue;
       }
-      await progress(job.id, 'EXTRACTING_AUDIO', `${stream.label} (${position + 1} of ${summary.audio.length})`);
+      await progress(job.id, 'EXTRACTING_AUDIO', `${label} (${position + 1} of ${summary.audio.length})`);
       const out = path.join(jobDir, name);
       const copied = !audioNeedsConversion(stream.codec);
       await extractAudio(sourcePath, stream.index, out, copied);
       const id = await upload(drive, renditions, out, name);
-      step(`audio ${position + 1}`, `${stream.label} ${MB(fs.statSync(out).size)} MB${copied ? ' (copied)' : ' (converted)'}`);
+      step(`audio ${position + 1}`, `${label} ${MB(fs.statSync(out).size)} MB${copied ? ' (copied)' : ' (converted)'}`);
       await fsp.rm(out, { force: true });
-      audioTracks.push({ language: key, label: stream.label, driveFileId: id, isDefault: stream.isDefault, sortOrder: position });
+      audioTracks.push({ language, label, driveFileId: id, isDefault: stream.isDefault, sortOrder: position });
     }
     if (!audioTracks.some((t) => t.isDefault) && audioTracks[0]) audioTracks[0].isDefault = true;
   } else {
@@ -563,9 +567,11 @@ async function buildTracks(
   }
 
   // --- subtitles ------------------------------------------------------------
-  const knownSubs = new Map(job.subtitleTracks.filter((s) => s.driveFileId).map((s) => [s.language, s.driveFileId!]));
+  const knownSubs = alreadyBuilt(job.subtitleTracks);
   const subtitleTracks: BuiltTracks['subtitleTracks'] = [];
   const skipped: string[] = [];
+  /** How many streams of each language have been seen, to tell them apart. */
+  const subsPerLanguage = new Map<string, number>();
 
   if (summary.subtitles.length > 0) await progress(job.id, 'DETECTING_SUBTITLES', `${summary.subtitles.length} found`);
   for (const [position, stream] of summary.subtitles.entries()) {
@@ -576,21 +582,22 @@ async function buildTracks(
       continue;
     }
     if (stopping) throw new Error('Stopped before this subtitle was built');
-    const key = stream.language ?? `sub${position + 1}`;
-    const name = `${base}-${key}.vtt`;
-    const already = knownSubs.get(key) ?? (await existingUpload(drive, renditions, name));
+    const language = stream.language ?? `sub${position + 1}`;
+    const { slug, label } = distinguish(language, stream.label, subsPerLanguage);
+    const name = `${base}-${slug}.vtt`;
+    const already = knownSubs.get(slug) ?? (await existingUpload(drive, renditions, name));
     if (already) {
-      step(`subtitle ${position + 1}`, `${stream.label} (reused)`);
-      subtitleTracks.push({ language: key, label: stream.label, driveFileId: already, isDefault: stream.isDefault, isForced: stream.isForced });
+      step(`subtitle ${position + 1}`, `${label} (reused)`);
+      subtitleTracks.push({ language, label, driveFileId: already, isDefault: stream.isDefault, isForced: stream.isForced });
       continue;
     }
-    await progress(job.id, 'CONVERTING_SUBTITLES', stream.label);
+    await progress(job.id, 'CONVERTING_SUBTITLES', label);
     const out = path.join(jobDir, name);
     await extractSubtitle(sourcePath, stream.index, out);
     const id = await upload(drive, renditions, out, name);
-    step(`subtitle ${position + 1}`, `${stream.label} ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
+    step(`subtitle ${position + 1}`, `${label} ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
     await fsp.rm(out, { force: true });
-    subtitleTracks.push({ language: key, label: stream.label, driveFileId: id, isDefault: stream.isDefault, isForced: stream.isForced });
+    subtitleTracks.push({ language, label, driveFileId: id, isDefault: stream.isDefault, isForced: stream.isForced });
   }
   if (summary.subtitles.length === 0) step('subtitles', 'none in the source (hardsubbed or absent)');
   for (const note of skipped) step('subtitle', `skipped: ${note}`);

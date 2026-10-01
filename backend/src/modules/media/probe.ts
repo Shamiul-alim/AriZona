@@ -350,3 +350,42 @@ export function subtitleExtractionArgs(source: string, streamIndex: number, out:
  * than inferred, because the guarantee is worth stating explicitly.
  */
 export const VIDEO_ENCODING_FLAGS = ['libx264', 'libx265', 'libvpx', '-vf', '-filter:v', '-c:v', '-vcodec'] as const;
+
+/**
+ * A filename slug and player label that tell same-language streams apart.
+ *
+ * A release can carry two streams of one language — full dialogue and a
+ * signs-and-songs track, or Latin American and European Spanish. Naming both
+ * after the language alone meant the second stream found the first one's
+ * uploaded file, reused it, and served the same subtitles twice while the other
+ * real track was never published at all. Solo Leveling S1E3 has two English
+ * and two Spanish subtitle streams with different content, and registered four
+ * tracks that were really two.
+ *
+ * The first stream of a language keeps the bare slug, so files uploaded before
+ * this are still found and reused. Later ones are numbered.
+ */
+export function distinguish(
+  language: string,
+  label: string,
+  seen: Map<string, number>,
+): { slug: string; label: string } {
+  const nth = (seen.get(language) ?? 0) + 1;
+  seen.set(language, nth);
+  return nth === 1 ? { slug: language, label } : { slug: `${language}-${nth}`, label: `${label} ${nth}` };
+}
+
+/**
+ * Tracks this job already has in storage, keyed the same way `distinguish`
+ * names them, so a re-run reuses each stream's own file rather than collapsing
+ * every stream of a language onto the first one.
+ */
+export function alreadyBuilt(tracks: Array<{ language: string; driveFileId: string | null }>): Map<string, string> {
+  const seen = new Map<string, number>();
+  const built = new Map<string, string>();
+  for (const track of tracks) {
+    const { slug } = distinguish(track.language, '', seen);
+    if (track.driveFileId) built.set(slug, track.driveFileId);
+  }
+  return built;
+}
