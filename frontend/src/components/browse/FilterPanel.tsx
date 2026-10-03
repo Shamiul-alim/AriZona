@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams, type ReadonlyURLSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { loadGenres } from '@/lib/genres';
 import { nextPreference, preferenceState, type PreferenceMode, type PreferenceState } from '@/lib/preferences';
 import { useAuthStore } from '@/lib/auth-store';
@@ -15,6 +15,91 @@ import { selectFieldSm } from '@/components/ui/Select';
  */
 const filterInputSm =
   'h-9 w-full rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none transition hover:border-line focus:border-brand/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 pointer-coarse:h-11';
+
+/**
+ * The filters the panel owns, in both directions.
+ *
+ * Sort, the text search, the A-Z letter and the page number are deliberately
+ * absent: they live outside the panel and commit on their own, so applying the
+ * panel must leave them alone rather than reset them.
+ */
+interface Filters {
+  genres: string[];
+  type: string[];
+  status: string[];
+  ageRating: string[];
+  source: string[];
+  avoidGenres: string[];
+  avoidType: string[];
+  avoidAgeRating: string[];
+  avoidSource: string[];
+  season: string;
+  year: string;
+  language: string;
+  minEpisodes: string;
+  maxEpisodes: string;
+  hideInList: boolean;
+}
+
+const EMPTY_FILTERS: Filters = {
+  genres: [], type: [], status: [], ageRating: [], source: [],
+  avoidGenres: [], avoidType: [], avoidAgeRating: [], avoidSource: [],
+  season: '', year: '', language: '', minEpisodes: '', maxEpisodes: '', hideInList: false,
+};
+
+/** The panel's filters as the URL currently has them. */
+function readFilters(params: URLSearchParams | ReadonlyURLSearchParams): Filters {
+  const read = (key: string) => params.get(key) ?? '';
+  const readList = (key: string) => {
+    const raw = params.get(key);
+    return raw ? raw.split(',').filter(Boolean) : [];
+  };
+  return {
+    genres: readList('genres'),
+    type: readList('type'),
+    status: readList('status'),
+    ageRating: readList('ageRating'),
+    source: readList('source'),
+    avoidGenres: readList('avoidGenres'),
+    avoidType: readList('avoidType'),
+    avoidAgeRating: readList('avoidAgeRating'),
+    avoidSource: readList('avoidSource'),
+    season: read('season'),
+    year: read('year'),
+    language: read('language'),
+    minEpisodes: read('minEpisodes'),
+    maxEpisodes: read('maxEpisodes'),
+    hideInList: read('hideInList') === 'true',
+  };
+}
+
+/**
+ * The same filters as query parameters, with the empty ones left out.
+ *
+ * One function for both writing the URL and comparing draft against applied, so
+ * "has anything changed?" can never disagree with what applying would send.
+ */
+function serialiseFilters(filters: Filters): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(filters)) {
+    if (Array.isArray(value)) {
+      if (value.length) out[key] = value.join(',');
+    } else if (value === true) {
+      out[key] = 'true';
+    } else if (typeof value === 'string' && value !== '') {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/** How many filters a set holds, counting each selected value once. */
+function countFilters(filters: Filters): number {
+  return Object.values(filters).reduce<number>(
+    (total, value) => total + (Array.isArray(value) ? value.length : value === true || (typeof value === 'string' && value !== '') ? 1 : 0),
+    0,
+  );
+}
 
 /**
  * The filters that express a taste, each paired with the parameter holding the
@@ -92,6 +177,7 @@ export function FilterPanel({ years }: { years: number[] }) {
   // panel is being used right now, not part of what is being shown, and the
   // existing panel keeps its own open/closed state local in the same way.
   const [mode, setMode] = useState<PreferenceMode>('prefer');
+  const [isPending, startTransition] = useTransition();
   const [query, setQuery] = useState(params.get('q') ?? '');
 
   useEffect(() => {
@@ -104,29 +190,40 @@ export function FilterPanel({ years }: { years: number[] }) {
     setQuery(params.get('q') ?? '');
   }, [params]);
 
-  const current = useMemo(() => {
-    const read = (key: string) => params.get(key) ?? '';
-    const readList = (key: string) => (params.get(key) ? params.get(key)!.split(',').filter(Boolean) : []);
-    return {
-      genres: readList('genres'),
-      type: readList('type'),
-      status: readList('status'),
-      ageRating: readList('ageRating'),
-      source: readList('source'),
-      avoidGenres: readList('avoidGenres'),
-      avoidType: readList('avoidType'),
-      avoidAgeRating: readList('avoidAgeRating'),
-      avoidSource: readList('avoidSource'),
-      season: read('season'),
-      year: read('year'),
-      language: read('language'),
-      sort: read('sort') || 'default',
-      minEpisodes: read('minEpisodes'),
-      maxEpisodes: read('maxEpisodes'),
-      hideInList: read('hideInList') === 'true',
-    };
-  }, [params]);
+  /**
+   * What the results currently reflect: the URL is the applied state.
+   *
+   * Keeping it there rather than in a store is what makes a refresh, the back
+   * button, a shared link and the pagination links all agree without any of
+   * them having to know about this component.
+   */
+  const applied = useMemo(() => readFilters(params), [params]);
 
+  /**
+   * What the panel is showing, which is allowed to run ahead of the results.
+   *
+   * Every chip used to push a new URL, and /browse is force-dynamic, so a
+   * single press re-ran the page and fetched the catalogue again — five
+   * preferences meant five requests and five grids, four of which nobody
+   * wanted. Presses now land here and go nowhere until they are applied.
+   */
+  const [draft, setDraft] = useState(applied);
+
+  // Re-seed whenever the applied state changes under us: a fresh load, the back
+  // button, a pagination link, or an apply completing. Keyed on the serialised
+  // form so an unrelated re-render cannot silently discard pending edits.
+  // A string, deliberately: serialiseFilters returns a fresh object every
+  // navigation, so depending on it directly re-seeded the draft on any URL
+  // change at all — submitting a text search threw away selections the user had
+  // not applied yet. Comparing the serialised form means the draft is only
+  // replaced when the applied filters have actually changed.
+  const appliedKey = useMemo(() => JSON.stringify(serialiseFilters(applied)), [applied]);
+  useEffect(() => {
+    setDraft(readFilters(params));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedKey]);
+
+  /** Commits a patch to the URL immediately. For controls outside the panel. */
   const push = useCallback(
     (patch: Record<string, string | string[] | boolean | undefined>) => {
       const next = new URLSearchParams(params.toString());
@@ -141,16 +238,34 @@ export function FilterPanel({ years }: { years: number[] }) {
       }
       // Any filter change invalidates the current page number.
       next.delete('page');
-      router.push(`/browse?${next.toString()}`);
+      startTransition(() => router.push(`/browse?${next.toString()}`));
     },
     [params, router],
   );
 
+  /** Edits the panel's own state. Deliberately makes no request. */
+  const edit = useCallback((patch: Partial<Filters>) => {
+    setDraft((previous) => ({ ...previous, ...patch }));
+  }, []);
+
+  /** Sends the whole panel in one go — the only thing that refetches. */
+  const applyDraft = useCallback(() => {
+    const next = new URLSearchParams();
+    // Everything the panel does not own is carried across untouched, so
+    // applying filters never drops a search term or a sort order.
+    for (const key of ['q', 'sort', 'letter', 'limit'] as const) {
+      const value = params.get(key);
+      if (value) next.set(key, value);
+    }
+    for (const [key, value] of Object.entries(serialiseFilters(draft))) next.set(key, value);
+    startTransition(() => router.push(`/browse?${next.toString()}`));
+  }, [draft, params, router]);
+
   const toggleInList = useCallback(
-    (key: string, value: string, list: string[]) => {
-      push({ [key]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] });
+    (key: keyof Filters, value: string, list: string[]) => {
+      edit({ [key]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] } as Partial<Filters>);
     },
-    [push],
+    [edit],
   );
 
   /**
@@ -164,51 +279,44 @@ export function FilterPanel({ years }: { years: number[] }) {
   const togglePreference = useCallback(
     (key: PreferenceKey, value: string) => {
       const avoidKey = AVOID_KEY[key];
-      const { preferred, avoided } = nextPreference(mode, value, current[key], current[avoidKey]);
-      push({ [key]: preferred, [avoidKey]: avoided });
+      const { preferred, avoided } = nextPreference(mode, value, draft[key], draft[avoidKey]);
+      edit({ [key]: preferred, [avoidKey]: avoided } as Partial<Filters>);
     },
-    [current, mode, push],
+    [draft, mode, edit],
   );
 
   /** Where a value stands today, whichever mode the panel happens to be in. */
   const stateOf = useCallback(
     (key: PreferenceKey, value: string): PreferenceState =>
-      preferenceState(value, current[key], current[AVOID_KEY[key]]),
-    [current],
+      preferenceState(value, draft[key], draft[AVOID_KEY[key]]),
+    [draft],
   );
 
-  const preferredCount = current.genres.length + current.type.length + current.ageRating.length + current.source.length;
+  const preferredCount = draft.genres.length + draft.type.length + draft.ageRating.length + draft.source.length;
   const avoidedCount =
-    current.avoidGenres.length + current.avoidType.length + current.avoidAgeRating.length + current.avoidSource.length;
+    draft.avoidGenres.length + draft.avoidType.length + draft.avoidAgeRating.length + draft.avoidSource.length;
 
   /** Empties one direction and leaves the other alone. */
   const clearDirection = useCallback(
     (direction: PreferenceMode) => {
-      push(
+      edit(
         direction === 'prefer'
           ? { genres: [], type: [], ageRating: [], source: [] }
           : { avoidGenres: [], avoidType: [], avoidAgeRating: [], avoidSource: [] },
       );
     },
-    [push],
+    [edit],
   );
 
-  const activeCount =
-    current.genres.length +
-    current.type.length +
-    current.status.length +
-    current.ageRating.length +
-    current.source.length +
-    current.avoidGenres.length +
-    current.avoidType.length +
-    current.avoidAgeRating.length +
-    current.avoidSource.length +
-    (current.season ? 1 : 0) +
-    (current.year ? 1 : 0) +
-    (current.language ? 1 : 0) +
-    (current.minEpisodes ? 1 : 0) +
-    (current.maxEpisodes ? 1 : 0) +
-    (current.hideInList ? 1 : 0);
+  // What the badge reports is what the results reflect, not what is merely
+  // selected: a count that moved on every press would say the filters were in
+  // effect before they had been applied.
+  const appliedCount = countFilters(applied);
+  const draftCount = countFilters(draft);
+    // "Has anything changed?" compares the two through the same serialiser that
+  // writes the URL, so it can never disagree with what applying would send.
+  const dirty = JSON.stringify(serialiseFilters(draft)) !== JSON.stringify(serialiseFilters(applied));
+
 
   return (
     <div className="card-surface overflow-hidden">
@@ -242,7 +350,7 @@ export function FilterPanel({ years }: { years: number[] }) {
         </form>
 
         <select
-          value={current.sort}
+          value={params.get('sort') || 'default'}
           onChange={(e) => push({ sort: e.target.value === 'default' ? undefined : e.target.value })}
           aria-label="Sort by"
           className={selectFieldSm}
@@ -260,21 +368,26 @@ export function FilterPanel({ years }: { years: number[] }) {
           aria-expanded={expanded}
           className={cn(
             'inline-flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] font-semibold transition',
-            expanded || activeCount > 0
+            expanded || appliedCount > 0
               ? 'bg-brand text-white'
               : 'border border-line-soft bg-base text-ink-soft hover:text-ink',
           )}
         >
           Filters
-          {activeCount > 0 ? (
-            <span className="rounded-full bg-white/25 px-1.5 text-[11px] font-bold">{activeCount}</span>
+          {appliedCount > 0 ? (
+            <span className="rounded-full bg-white/25 px-1.5 text-[11px] font-bold">{appliedCount}</span>
           ) : null}
         </button>
 
-        {activeCount > 0 || params.get('q') ? (
+        {appliedCount > 0 || draftCount > 0 || params.get('q') ? (
           <button
             type="button"
-            onClick={() => router.push('/browse')}
+            onClick={() => {
+              // Both halves: the selection in the panel and the applied URL.
+              setDraft(EMPTY_FILTERS);
+              setQuery('');
+              startTransition(() => router.push('/browse'));
+            }}
             className="h-10 rounded-lg px-3 text-[13px] font-medium text-ink-muted transition hover:text-danger"
           >
             Reset
@@ -376,8 +489,8 @@ export function FilterPanel({ years }: { years: number[] }) {
                 {STATUSES.map((s) => (
                   <Chip
                     key={s}
-                    active={current.status.includes(s)}
-                    onClick={() => toggleInList('status', s, current.status)}
+                    active={draft.status.includes(s)}
+                    onClick={() => toggleInList('status', s, draft.status)}
                   >
                     {label(s)}
                   </Chip>
@@ -388,7 +501,7 @@ export function FilterPanel({ years }: { years: number[] }) {
             <Group title="Season">
               <div className="flex flex-wrap gap-1.5">
                 {SEASONS.map((s) => (
-                  <Chip key={s} active={current.season === s} onClick={() => push({ season: current.season === s ? undefined : s })}>
+                  <Chip key={s} active={draft.season === s} onClick={() => edit({ season: draft.season === s ? '' : s })}>
                     {label(s)}
                   </Chip>
                 ))}
@@ -397,8 +510,8 @@ export function FilterPanel({ years }: { years: number[] }) {
 
             <Group title="Year">
               <select
-                value={current.year}
-                onChange={(e) => push({ year: e.target.value || undefined })}
+                value={draft.year}
+                onChange={(e) => edit({ year: e.target.value })}
                 aria-label="Release year"
                 className={selectFieldSm}
               >
@@ -416,8 +529,8 @@ export function FilterPanel({ years }: { years: number[] }) {
                 {['SUB', 'DUB'].map((l) => (
                   <Chip
                     key={l}
-                    active={current.language === l}
-                    onClick={() => push({ language: current.language === l ? undefined : l })}
+                    active={draft.language === l}
+                    onClick={() => edit({ language: draft.language === l ? '' : l })}
                   >
                     {l === 'SUB' ? 'Subbed' : 'Dubbed'}
                   </Chip>
@@ -457,8 +570,8 @@ export function FilterPanel({ years }: { years: number[] }) {
                   type="number"
                   min={0}
                   placeholder="Min"
-                  defaultValue={current.minEpisodes}
-                  onBlur={(e) => push({ minEpisodes: e.target.value || undefined })}
+                  value={draft.minEpisodes}
+                  onChange={(e) => edit({ minEpisodes: e.target.value })}
                   aria-label="Minimum episodes"
                   className={filterInputSm}
                 />
@@ -467,8 +580,8 @@ export function FilterPanel({ years }: { years: number[] }) {
                   type="number"
                   min={1}
                   placeholder="Max"
-                  defaultValue={current.maxEpisodes}
-                  onBlur={(e) => push({ maxEpisodes: e.target.value || undefined })}
+                  value={draft.maxEpisodes}
+                  onChange={(e) => edit({ maxEpisodes: e.target.value })}
                   aria-label="Maximum episodes"
                   className={filterInputSm}
                 />
@@ -480,13 +593,61 @@ export function FilterPanel({ years }: { years: number[] }) {
             <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-soft">
               <input
                 type="checkbox"
-                checked={current.hideInList}
-                onChange={(e) => push({ hideInList: e.target.checked })}
+                checked={draft.hideInList}
+                onChange={(e) => edit({ hideInList: e.target.checked })}
                 className="h-4 w-4 rounded border-line bg-base accent-[var(--color-brand)]"
               />
               Hide titles already on my list
             </label>
           ) : null}
+
+          {/* Nothing above this line has touched the results. This is what does. */}
+          <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 border-t border-line-soft bg-surface/95 px-4 py-3 backdrop-blur">
+            <p aria-live="polite" className="text-[12px] text-ink-faint">
+              {isPending
+                ? 'Updating results…'
+                : dirty
+                  ? `${draftCount === 0 ? 'No filters' : `${draftCount} filter${draftCount === 1 ? '' : 's'}`} selected — not applied yet`
+                  : appliedCount > 0
+                    ? `Showing ${appliedCount} filter${appliedCount === 1 ? '' : 's'}`
+                    : 'No filters applied'}
+            </p>
+            <div className="flex items-center gap-2">
+              {draftCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => edit(EMPTY_FILTERS)}
+                  disabled={isPending}
+                  className="h-10 rounded-lg px-3 text-[13px] font-medium text-ink-muted transition hover:text-ink disabled:opacity-50"
+                >
+                  Clear selection
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={applyDraft}
+                // Disabled while a previous apply is in flight, so a second
+                // press cannot start a second fetch of the same thing.
+                disabled={isPending || !dirty}
+                className={cn(
+                  'inline-flex h-10 items-center gap-2 rounded-lg px-5 text-[13.5px] font-semibold transition',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+                  isPending || !dirty
+                    ? 'cursor-not-allowed bg-surface-2 text-ink-faint'
+                    : 'bg-brand text-white hover:bg-brand-bright',
+                )}
+              >
+                {isPending ? (
+                  <>
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+                    Searching…
+                  </>
+                ) : (
+                  'Search with these filters'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
