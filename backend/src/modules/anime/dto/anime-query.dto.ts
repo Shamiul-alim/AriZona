@@ -100,6 +100,45 @@ export class AnimeQueryDto extends PaginationQueryDto {
   @Transform(toArray)
   source?: AnimeSource[];
 
+  // --- things to keep out -------------------------------------------------
+  //
+  // The avoid filters mirror the four taxonomy filters above, because those are
+  // the ones that describe what a title *is* and so can describe what someone
+  // never wants. The rest are not preferences: status is where a series is in
+  // its life, and season, year, episode count and language are scalars whose
+  // opposite is just the other end of a range.
+  //
+  // Exclusion earns its place where the list of values is long enough that
+  // picking everything except two is not a realistic alternative: avoiding two
+  // of twenty-odd genres is one press, selecting the other twenty is not.
+
+  @ApiPropertyOptional({ isArray: true, type: String, description: 'Genre slugs to exclude' })
+  @IsOptional()
+  @IsArray()
+  @Transform(toArray)
+  avoidGenres?: string[];
+
+  @ApiPropertyOptional({ enum: AnimeType, isArray: true, description: 'Types to exclude' })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(AnimeType, { each: true })
+  @Transform(toArray)
+  avoidType?: AnimeType[];
+
+  @ApiPropertyOptional({ enum: AgeRating, isArray: true, description: 'Age ratings to exclude' })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(AgeRating, { each: true })
+  @Transform(toArray)
+  avoidAgeRating?: AgeRating[];
+
+  @ApiPropertyOptional({ enum: AnimeSource, isArray: true, description: 'Sources to exclude' })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(AnimeSource, { each: true })
+  @Transform(toArray)
+  avoidSource?: AnimeSource[];
+
   @ApiPropertyOptional({ enum: MediaKind, description: 'Only titles that have SUB or DUB episodes' })
   @IsOptional()
   @IsEnum(MediaKind)

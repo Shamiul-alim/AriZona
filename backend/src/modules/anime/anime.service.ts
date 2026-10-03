@@ -288,45 +288,7 @@ export class AnimeService {
   }
 
   private async buildWhere(query: AnimeQueryDto, userId?: string): Promise<Prisma.AnimeWhereInput> {
-    const and: Prisma.AnimeWhereInput[] = [PUBLISHED];
-
-    if (query.q) {
-      and.push({
-        OR: [
-          { titleEnglish: { contains: query.q, mode: 'insensitive' } },
-          { titleJapanese: { contains: query.q, mode: 'insensitive' } },
-          { titleRomaji: { contains: query.q, mode: 'insensitive' } },
-          { titles: { some: { title: { contains: query.q, mode: 'insensitive' } } } },
-        ],
-      });
-    }
-
-    if (query.genres?.length) {
-      // Every selected genre must be present, not just one of them.
-      and.push({
-        AND: query.genres.map((slug) => ({ genres: { some: { genre: { slug } } } })),
-      });
-    }
-
-    if (query.type?.length) and.push({ type: { in: query.type } });
-    if (query.status?.length) and.push({ status: { in: query.status } });
-    if (query.season) and.push({ season: query.season });
-    if (query.year) and.push({ releaseYear: query.year });
-    if (query.ageRating?.length) and.push({ ageRating: { in: query.ageRating } });
-    if (query.source?.length) and.push({ source: { in: query.source } });
-    if (query.studio) and.push({ studio: { slug: query.studio } });
-    if (query.producer) and.push({ producers: { some: { producer: { slug: query.producer } } } });
-    if (query.minScore !== undefined) and.push({ score: { gte: query.minScore } });
-
-    if (query.language === MediaKind.SUB) and.push({ subEpisodeCount: { gt: 0 } });
-    if (query.language === MediaKind.DUB) and.push({ dubEpisodeCount: { gt: 0 } });
-
-    if (query.minEpisodes !== undefined) and.push({ totalEpisodes: { gte: query.minEpisodes } });
-    if (query.maxEpisodes !== undefined) and.push({ totalEpisodes: { lte: query.maxEpisodes } });
-
-    if (query.letter && query.letter !== 'all') {
-      and.push(letterFilter(query.letter));
-    }
+    const and: Prisma.AnimeWhereInput[] = animeFilters(query);
 
     if (query.hideInList && userId) {
       const entries = await this.prisma.watchlistEntry.findMany({
@@ -397,4 +359,84 @@ function periodStart(period: Exclude<TrendingPeriod, 'all'>): Date {
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() - (days - 1));
   return d;
+}
+
+/**
+ * Every filter a catalogue query asks for, as Prisma conditions.
+ *
+ * Pulled out of the service because this is the one place that decides what a
+ * filtered listing means, and because it is worth testing on its own: the only
+ * thing buildWhere adds is the signed-in viewer's watchlist, which needs a
+ * database round trip.
+ *
+ * Preferences come in two directions. The positive ones narrow to what someone
+ * wants; the avoid ones remove what they do not, which is not the same as
+ * selecting everything else — "not these two genres" is one choice, while its
+ * complement is twenty.
+ */
+export function animeFilters(query: AnimeQueryDto): Prisma.AnimeWhereInput[] {
+  const and: Prisma.AnimeWhereInput[] = [PUBLISHED];
+
+  if (query.q) {
+    and.push({
+      OR: [
+        { titleEnglish: { contains: query.q, mode: 'insensitive' } },
+        { titleJapanese: { contains: query.q, mode: 'insensitive' } },
+        { titleRomaji: { contains: query.q, mode: 'insensitive' } },
+        { titles: { some: { title: { contains: query.q, mode: 'insensitive' } } } },
+      ],
+    });
+  }
+
+  if (query.genres?.length) {
+    // Every selected genre must be present, not just one of them.
+    and.push({
+      AND: query.genres.map((slug) => ({ genres: { some: { genre: { slug } } } })),
+    });
+  }
+
+  if (query.type?.length) and.push({ type: { in: query.type } });
+  if (query.status?.length) and.push({ status: { in: query.status } });
+  if (query.season) and.push({ season: query.season });
+  if (query.year) and.push({ releaseYear: query.year });
+  if (query.ageRating?.length) and.push({ ageRating: { in: query.ageRating } });
+  if (query.source?.length) and.push({ source: { in: query.source } });
+  if (query.studio) and.push({ studio: { slug: query.studio } });
+  if (query.producer) and.push({ producers: { some: { producer: { slug: query.producer } } } });
+  if (query.minScore !== undefined) and.push({ score: { gte: query.minScore } });
+
+  // --- avoid ---------------------------------------------------------------
+  //
+  // One avoided genre is enough to exclude a title: someone who says they do
+  // not want horror does not want the horror comedy either.
+  if (query.avoidGenres?.length) {
+    and.push({
+      NOT: { genres: { some: { genre: { slug: { in: query.avoidGenres } } } } },
+    });
+  }
+
+  if (query.avoidType?.length) and.push({ type: { notIn: query.avoidType } });
+
+  // ageRating and source are nullable, and in SQL an unset column compared with
+  // NOT IN yields NULL rather than true — so a plain notIn would quietly drop
+  // every untagged title as well as the avoided ones. Someone avoiding an adult
+  // rating has said nothing about titles that carry no rating at all.
+  if (query.avoidAgeRating?.length) {
+    and.push({ OR: [{ ageRating: null }, { ageRating: { notIn: query.avoidAgeRating } }] });
+  }
+  if (query.avoidSource?.length) {
+    and.push({ OR: [{ source: null }, { source: { notIn: query.avoidSource } }] });
+  }
+
+  if (query.language === MediaKind.SUB) and.push({ subEpisodeCount: { gt: 0 } });
+  if (query.language === MediaKind.DUB) and.push({ dubEpisodeCount: { gt: 0 } });
+
+  if (query.minEpisodes !== undefined) and.push({ totalEpisodes: { gte: query.minEpisodes } });
+  if (query.maxEpisodes !== undefined) and.push({ totalEpisodes: { lte: query.maxEpisodes } });
+
+  if (query.letter && query.letter !== 'all') {
+    and.push(letterFilter(query.letter));
+  }
+
+  return and;
 }
