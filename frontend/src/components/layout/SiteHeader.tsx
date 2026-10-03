@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { searchTerm } from '@/lib/search';
 import { apiFetch, qs } from '@/lib/api';
+import { loadGenres } from '@/lib/genres';
 import { useAuthStore } from '@/lib/auth-store';
 import type { AnimeCard, GenreRef, Paginated } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -61,7 +62,7 @@ export function SiteHeader() {
   useMenuEscape(mobileOpen, () => setMobileOpen(false));
 
   useEffect(() => {
-    apiFetch<GenreRef[]>('/genres')
+    loadGenres()
       .then(setGenres)
       .catch(() => setGenres([]));
   }, []);

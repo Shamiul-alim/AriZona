@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
+import { loadGenres } from '@/lib/genres';
 import { useAuthStore } from '@/lib/auth-store';
 import type { GenreRef } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -71,7 +71,7 @@ export function FilterPanel({ years }: { years: number[] }) {
   const [query, setQuery] = useState(params.get('q') ?? '');
 
   useEffect(() => {
-    apiFetch<GenreRef[]>('/genres')
+    loadGenres()
       .then(setGenres)
       .catch(() => setGenres([]));
   }, []);

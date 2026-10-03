@@ -21,10 +21,25 @@ export function RatingWidget({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // Wait for the session to settle. `status` goes idle -> loading ->
+    // anonymous|authenticated while the app trades its refresh cookie for a
+    // token, and fetching on each step asked the API for the same summary three
+    // times per page view — and the first answer, made as an anonymous caller,
+    // would have had no myRating in it anyway.
+    if (status === 'idle' || status === 'loading') return;
+
+    let current = true;
     const load = status === 'authenticated' ? authFetch<RatingSummary> : apiFetch<RatingSummary>;
     void load(`/anime/${slug}/rating`)
-      .then(setSummary)
+      .then((result) => {
+        // Signing in mid-flight starts a second request; the older one must not
+        // land on top of it.
+        if (current) setSummary(result);
+      })
       .catch(() => undefined);
+    return () => {
+      current = false;
+    };
   }, [slug, status]);
 
   const submit = async (score: number) => {
