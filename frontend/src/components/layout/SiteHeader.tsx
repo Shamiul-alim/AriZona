@@ -73,12 +73,37 @@ export function SiteHeader() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Close every transient surface on navigation.
+  // Close every transient surface on navigation, and put the search box back in
+  // step with wherever we just landed.
+  //
+  // This header is mounted by the root layout, so it outlives every route
+  // change: a term typed on one page was still sitting in the box on the next
+  // one, long after its results were gone. Browse is the one route where the
+  // term is part of the page rather than a leftover, so there it mirrors ?q=
+  // and everywhere else it clears.
+  //
+  // The URL is read from window rather than with useSearchParams() on purpose:
+  // this component is in the root layout, and useSearchParams() there would opt
+  // every statically rendered page into dynamic rendering for the sake of one
+  // input's value.
+  const syncSearchToUrl = useCallback(() => {
+    setQuery(pathname === '/browse' ? (new URLSearchParams(window.location.search).get('q') ?? '') : '');
+  }, [pathname]);
+
   useEffect(() => {
     setOpenMenu(null);
     setMobileOpen(false);
     setSearchOpen(false);
-  }, [pathname]);
+    syncSearchToUrl();
+  }, [pathname, syncSearchToUrl]);
+
+  // Back and forward between two searches keep the same pathname, so the effect
+  // above does not run and the box would still hold the term from before the
+  // jump.
+  useEffect(() => {
+    window.addEventListener('popstate', syncSearchToUrl);
+    return () => window.removeEventListener('popstate', syncSearchToUrl);
+  }, [syncSearchToUrl]);
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
@@ -230,8 +255,36 @@ export function SiteHeader() {
 
         <div className="flex flex-1 items-center justify-end gap-1.5 xl:flex-none">
           {/* Search */}
-          <div ref={searchRef} className="relative">
-            <form onSubmit={submitSearch} className="flex items-center">
+          <div ref={searchRef} className="relative flex items-center gap-1.5">
+            {/* Straight to the full catalogue with its filters. A button rather
+                than a Link because it sits inside the search row and must never
+                be mistaken for submitting the form. */}
+            <button
+              type="button"
+              onClick={() => router.push('/browse')}
+              aria-label="Browse and filter all anime"
+              title="Browse and filter all anime"
+              className={cn(
+                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line-soft bg-surface/80 text-ink-faint transition',
+                'hover:border-brand/60 hover:bg-surface hover:text-ink',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+                'pointer-coarse:h-11 pointer-coarse:w-11',
+              )}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M4 6h16M7 12h10M10 18h4" />
+              </svg>
+            </button>
+
+            <form onSubmit={submitSearch} className="relative flex items-center">
               <input
                 type="search"
                 value={query}
@@ -242,7 +295,7 @@ export function SiteHeader() {
                 className={cn(
                   'h-9 rounded-full border border-line-soft bg-surface/80 pl-9 pr-3 text-[13px] text-ink outline-none transition-all placeholder:text-ink-faint focus:border-brand/60 focus:bg-surface',
                   'pointer-coarse:h-11',
-                  'w-36 focus:w-56 sm:w-44 sm:focus:w-72',
+                  'w-32 focus:w-52 sm:w-44 sm:focus:w-72',
                 )}
               />
               <svg

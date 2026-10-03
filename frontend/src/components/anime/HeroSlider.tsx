@@ -2,11 +2,13 @@
 
 import { SmartImage as Image } from '@/components/ui/SmartImage';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FeaturedEntry } from '@/lib/types';
 import { cn, formatDuration, statusLabel, typeLabel } from '@/lib/utils';
 
 const ROTATE_MS = 8000;
+/** Shortest horizontal travel counted as a swipe rather than a stray tap. */
+const SWIPE_PX = 40;
 
 /**
  * Honours the OS "reduce motion" setting without an animation library.
@@ -26,23 +28,48 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
+  const touchX = useRef<number | null>(null);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Bumped by any manual move so the autoplay timer below restarts: without it
+  // a click could be followed by an automatic slide a moment later, which reads
+  // as the arrow having jumped two.
+  const [manualNonce, setManualNonce] = useState(0);
   const reduceMotion = usePrefersReducedMotion();
 
+  const wrap = useCallback((next: number, length: number) => ((next % length) + length) % length, []);
+
+  /** Jump to an absolute slide — what the dots do. */
   const go = useCallback(
     (next: number) => {
       if (entries.length === 0) return;
-      setIndex(((next % entries.length) + entries.length) % entries.length);
+      setIndex(wrap(next, entries.length));
+      setManualNonce((n) => n + 1);
     },
-    [entries.length],
+    [entries.length, wrap],
+  );
+
+  /**
+   * Move by one, relative to whatever is showing now.
+   *
+   * Derived inside the updater rather than from the rendered `index`, so two
+   * fast clicks advance two slides instead of both computing from the same
+   * stale value and landing on the same one.
+   */
+  const step = useCallback(
+    (delta: number) => {
+      if (entries.length === 0) return;
+      setIndex((i) => wrap(i + delta, entries.length));
+      setManualNonce((n) => n + 1);
+    },
+    [entries.length, wrap],
   );
 
   useEffect(() => {
     if (paused || entries.length <= 1 || reduceMotion) return;
     const timer = setInterval(() => setIndex((i) => (i + 1) % entries.length), ROTATE_MS);
     return () => clearInterval(timer);
-  }, [paused, entries.length, reduceMotion]);
+  }, [paused, entries.length, reduceMotion, manualNonce]);
 
   if (entries.length === 0) return null;
 
@@ -51,9 +78,29 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
 
   return (
     <section
-      className="relative h-[clamp(26rem,62vh,36rem)] w-full overflow-hidden"
+      className="group relative h-[clamp(26rem,62vh,36rem)] w-full overflow-hidden"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
+      onTouchStart={(e) => {
+        touchX.current = e.touches[0]?.clientX ?? null;
+      }}
+      onTouchEnd={(e) => {
+        const from = touchX.current;
+        touchX.current = null;
+        if (from === null) return;
+        const dx = (e.changedTouches[0]?.clientX ?? from) - from;
+        // Far enough to be a swipe rather than a tap that drifted.
+        if (Math.abs(dx) >= SWIPE_PX) step(dx < 0 ? 1 : -1);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          step(1);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          step(-1);
+        }
+      }}
       aria-roledescription="carousel"
       aria-label="Featured anime"
     >
@@ -164,6 +211,15 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
         </div>
       </div>
 
+      {/* Manual navigation. The dots remain the way to jump to a specific
+          slide; these move one at a time and wrap, like the autoplay does. */}
+      {entries.length > 1 ? (
+        <>
+          <SliderArrow direction="prev" onClick={() => step(-1)} />
+          <SliderArrow direction="next" onClick={() => step(1)} />
+        </>
+      ) : null}
+
       {/* Pagination */}
       {entries.length > 1 ? (
         <div className="absolute bottom-5 left-1/2 z-10 flex -translate-x-1/2 gap-2 md:left-auto md:right-8 md:translate-x-0">
@@ -190,4 +246,46 @@ export function HeroSlider({ entries }: { entries: FeaturedEntry[] }) {
 
 function Dot() {
   return <span className="text-ink-faint">·</span>;
+}
+
+/**
+ * One previous/next control.
+ *
+ * Sits clear of the slide's text and buttons: vertically centred at the very
+ * edges, where the copy never reaches. Always visible on a touch pointer, where
+ * there is no hover to reveal it.
+ */
+function SliderArrow({ direction, onClick }: { direction: 'prev' | 'next'; onClick: () => void }) {
+  const isPrev = direction === 'prev';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={isPrev ? 'Previous featured title' : 'Next featured title'}
+      className={cn(
+        'absolute top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full',
+        'border border-white/15 bg-black/45 text-ink backdrop-blur transition',
+        'hover:bg-black/70 hover:text-white',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-bright',
+        // Out of the way on a desktop until the slider is hovered or focused,
+        // but never hidden from a keyboard or a touch screen.
+        'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+        'pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:opacity-100',
+        isPrev ? 'left-2 md:left-4' : 'right-2 md:right-4',
+      )}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d={isPrev ? 'm15 18-6-6 6-6' : 'm9 6 6 6-6 6'} />
+      </svg>
+    </button>
+  );
 }

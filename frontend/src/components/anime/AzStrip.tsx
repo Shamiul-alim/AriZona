@@ -29,10 +29,16 @@ export async function AzStrip({ active, basePath = '/az' }: AzStripProps) {
         const isActive = (active ?? 'all').toLowerCase() === key.toLowerCase();
         const disabled = letter !== 'All' && count === 0;
 
+        // Pressing the letter you are already on clears it rather than
+        // navigating to where you already are: it was the one filter on the site
+        // that could be switched on but not off. "All" is the absence of the
+        // parameter, which is also what the page canonicalises to.
+        const href = isActive || key === 'all' ? basePath : `${basePath}?letter=${encodeURIComponent(key)}`;
+
         return (
           <Link
             key={letter}
-            href={`${basePath}?letter=${encodeURIComponent(key)}`}
+            href={href}
             aria-current={isActive}
             aria-disabled={disabled}
             className={cn(

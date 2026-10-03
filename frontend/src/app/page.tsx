@@ -37,7 +37,7 @@ export default async function HomePage() {
     meta: { page: 1, limit: 0, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },
   };
 
-  const [featured, latest, trending, top, newest, added, completed, upcoming, popular, posts] = await Promise.all([
+  const [featured, latest, trending, top, newest, added, popular, posts] = await Promise.all([
     safe(apiFetch<FeaturedEntry[]>('/anime/featured', { revalidate: 120 }), []),
     safe(
       apiFetch<Paginated<LatestEpisode>>(`/episodes/latest${qs({ limit: 12 })}`, { revalidate: 60 }),
@@ -47,18 +47,6 @@ export default async function HomePage() {
     safe(apiFetch<AnimeCardType[]>(`/anime/top${qs({ period: 'week', limit: 10 })}`, { revalidate: 300 }), []),
     safe(apiFetch<Paginated<AnimeCardType>>(`/anime${qs({ sort: 'release', limit: 14 })}`, { revalidate: 300 }), emptyPage),
     safe(apiFetch<Paginated<AnimeCardType>>(`/anime${qs({ sort: 'added', limit: 14 })}`, { revalidate: 300 }), emptyPage),
-    safe(
-      apiFetch<Paginated<AnimeCardType>>(`/anime${qs({ status: 'COMPLETED', sort: 'updated', limit: 14 })}`, {
-        revalidate: 300,
-      }),
-      emptyPage,
-    ),
-    safe(
-      apiFetch<Paginated<AnimeCardType>>(`/anime${qs({ status: 'UPCOMING', sort: 'release', limit: 14 })}`, {
-        revalidate: 300,
-      }),
-      emptyPage,
-    ),
     safe(apiFetch<Paginated<AnimeCardType>>(`/anime${qs({ sort: 'views', limit: 10 })}`, { revalidate: 300 }), emptyPage),
     safe(
       apiFetch<Paginated<CommunityPostSummary>>(`/community/posts${qs({ limit: 5, sort: 'newest' })}`, {
@@ -107,20 +95,6 @@ export default async function HomePage() {
               <section>
                 <SectionHeader title="Newly Added" href="/browse?sort=added" />
                 <AnimeRail items={added.data} />
-              </section>
-            ) : null}
-
-            {upcoming.data.length > 0 ? (
-              <section>
-                <SectionHeader title="Upcoming" subtitle="Announced, not yet airing" href="/browse?status=UPCOMING" />
-                <AnimeRail items={upcoming.data} />
-              </section>
-            ) : null}
-
-            {completed.data.length > 0 ? (
-              <section>
-                <SectionHeader title="Just Completed" href="/browse?status=COMPLETED" />
-                <AnimeRail items={completed.data} />
               </section>
             ) : null}
           </div>

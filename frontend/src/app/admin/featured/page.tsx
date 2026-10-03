@@ -1,11 +1,14 @@
 'use client';
 
 import { SmartImage as Image } from '@/components/ui/SmartImage';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { qs } from '@/lib/api';
 import { authFetch } from '@/lib/auth-store';
 import type { AnimeCard } from '@/lib/types';
-import { AdminHeader, Banner, Button, Card, Label, adminInput } from '@/components/admin/ui';
+import { AdminHeader, AnchoredPanel, Banner, Button, Card, Label, adminInput } from '@/components/admin/ui';
+
+/** Shared by the input's aria-controls and the focus helper. */
+const RESULTS_ID = 'featured-search-results';
 
 interface FeaturedEntry {
   id: string;
@@ -25,6 +28,38 @@ export default function AdminFeaturedPage() {
   const [banner, setBanner] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<AnimeCard[]>([]);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Moves focus between the results.
+   *
+   * The list is rendered through a portal at the end of <body>, so it is not
+   * next to the input in tab order and Tab cannot reach it. Arrow keys are the
+   * expected way into a combobox's list anyway, so they are what moves focus
+   * here; Enter and Space then activate the focused result natively.
+   */
+  const moveThroughResults = useCallback((direction: 1 | -1) => {
+    const list = document.getElementById(RESULTS_ID);
+    if (!list) return;
+    const items = Array.from(list.querySelectorAll<HTMLButtonElement>('button'));
+    if (items.length === 0) return;
+    const current = items.findIndex((item) => item === document.activeElement);
+    const next = current === -1 ? (direction === 1 ? 0 : items.length - 1) : (current + direction + items.length) % items.length;
+    items[next]?.focus();
+  }, []);
+
+  const onResultsKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveThroughResults(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveThroughResults(-1);
+      }
+    },
+    [moveThroughResults],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,19 +125,25 @@ export default function AdminFeaturedPage() {
       {banner ? <Banner state={banner} /> : null}
 
       <Card title="Add a title">
-        <div className="relative">
+        <div>
           <input
+            ref={searchRef}
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search the catalogue…"
             aria-label="Search anime"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-controls={RESULTS_ID}
+            aria-autocomplete="list"
+            onKeyDown={onResultsKeyDown}
             className={adminInput}
           />
-          {results.length > 0 ? (
-            <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-2xl">
+          <AnchoredPanel anchorRef={searchRef} open={results.length > 0} onClose={() => setResults([])}>
+            <ul id={RESULTS_ID} role="listbox" onKeyDown={onResultsKeyDown}>
               {results.map((anime) => (
-                <li key={anime.id}>
+                <li key={anime.id} role="option" aria-selected={false}>
                   <button
                     type="button"
                     onClick={() => {
@@ -110,7 +151,7 @@ export default function AdminFeaturedPage() {
                       setSearch('');
                       setResults([]);
                     }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/6"
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/6 focus-visible:bg-white/10 focus-visible:outline-none"
                   >
                     <span className="relative h-12 w-8 shrink-0 overflow-hidden rounded bg-surface-2">
                       {anime.posterUrl ? (
@@ -122,7 +163,7 @@ export default function AdminFeaturedPage() {
                 </li>
               ))}
             </ul>
-          ) : null}
+          </AnchoredPanel>
         </div>
       </Card>
 
