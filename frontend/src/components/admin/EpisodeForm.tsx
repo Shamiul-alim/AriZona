@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils';
 import { autoTracksForMode, mediaModeFromSource, type MediaMode } from '@/lib/media-mode';
 import { MediaProcessingStatus } from './MediaProcessingStatus';
 import { MasterSourceField } from './MasterSourceField';
-import { UploadButton } from './VideoUpload';
 import { AdminHeader, Banner, Button, Card, Label, adminInput, adminSelect, adminTextarea } from './ui';
 import { ImageUploadField } from './ImageUploadField';
 
@@ -810,7 +809,6 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                             </p>
                             <MasterSourceField
                               value={source.masterDriveFileIdOrUrl}
-                              episodeId={episodeId}
                               onChange={(master) => updateSource(sourceIndex, { masterDriveFileIdOrUrl: master })}
                             />
                           </>
@@ -907,19 +905,6 @@ export function EpisodeForm({ episodeId, presetAnimeId }: { episodeId?: string; 
                                 aria-label="Source location"
                                 className={`${adminInput} min-w-48 flex-1`}
                               />
-
-                              {/* Upload or paste a link — both land in the same
-                                  field, so one quality can be uploaded and
-                                  another linked without the two paths diverging. */}
-                              {isDrive ? (
-                                <UploadButton
-                                  episodeId={episodeId}
-                                  suffix={(QUALITY_LABELS[variant.quality] ?? variant.quality).toLowerCase()}
-                                  onUploaded={(driveFileId) =>
-                                    updateVariant(sourceIndex, variantIndex, { driveFileIdOrUrl: driveFileId })
-                                  }
-                                />
-                              ) : null}
 
                               <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-muted">
                                 <input
