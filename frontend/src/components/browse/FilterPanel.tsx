@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadGenres } from '@/lib/genres';
+import { nextPreference, preferenceState, type PreferenceMode, type PreferenceState } from '@/lib/preferences';
 import { useAuthStore } from '@/lib/auth-store';
 import type { GenreRef } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -14,6 +15,25 @@ import { selectFieldSm } from '@/components/ui/Select';
  */
 const filterInputSm =
   'h-9 w-full rounded-lg border border-line-soft bg-base px-3 text-[13px] text-ink outline-none transition hover:border-line focus:border-brand/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 pointer-coarse:h-11';
+
+/**
+ * The filters that express a taste, each paired with the parameter holding the
+ * values to keep out.
+ *
+ * Only these four: they describe what a title *is*, so they can also describe
+ * what someone never wants. Status is where a series is in its life rather than
+ * a taste, and season, year, episode count and language are scalars whose
+ * opposite is simply the other end of a range — "avoid 2019" is not a
+ * preference anyone holds.
+ */
+const AVOID_KEY = {
+  genres: 'avoidGenres',
+  type: 'avoidType',
+  ageRating: 'avoidAgeRating',
+  source: 'avoidSource',
+} as const;
+
+type PreferenceKey = keyof typeof AVOID_KEY;
 
 const TYPES = ['TV', 'MOVIE', 'OVA', 'ONA', 'SPECIAL', 'TV_SHORT', 'TV_SPECIAL', 'MUSIC'];
 const STATUSES = ['ONGOING', 'COMPLETED', 'UPCOMING', 'HIATUS', 'CANCELLED'];
@@ -68,6 +88,10 @@ export function FilterPanel({ years }: { years: number[] }) {
 
   const [genres, setGenres] = useState<GenreRef[]>([]);
   const [expanded, setExpanded] = useState(false);
+  // Which direction a press means. Deliberately not in the URL: it is how the
+  // panel is being used right now, not part of what is being shown, and the
+  // existing panel keeps its own open/closed state local in the same way.
+  const [mode, setMode] = useState<PreferenceMode>('prefer');
   const [query, setQuery] = useState(params.get('q') ?? '');
 
   useEffect(() => {
@@ -89,6 +113,10 @@ export function FilterPanel({ years }: { years: number[] }) {
       status: readList('status'),
       ageRating: readList('ageRating'),
       source: readList('source'),
+      avoidGenres: readList('avoidGenres'),
+      avoidType: readList('avoidType'),
+      avoidAgeRating: readList('avoidAgeRating'),
+      avoidSource: readList('avoidSource'),
       season: read('season'),
       year: read('year'),
       language: read('language'),
@@ -125,12 +153,56 @@ export function FilterPanel({ years }: { years: number[] }) {
     [push],
   );
 
+  /**
+   * Presses a value in whichever direction the panel is currently in.
+   *
+   * Both lists are written on every press, which is what stops a value from
+   * ever sitting in both: adding to one necessarily removes it from the other,
+   * so "I like this" and "I never want this" cannot both be true and the
+   * results can never be asked to satisfy a contradiction.
+   */
+  const togglePreference = useCallback(
+    (key: PreferenceKey, value: string) => {
+      const avoidKey = AVOID_KEY[key];
+      const { preferred, avoided } = nextPreference(mode, value, current[key], current[avoidKey]);
+      push({ [key]: preferred, [avoidKey]: avoided });
+    },
+    [current, mode, push],
+  );
+
+  /** Where a value stands today, whichever mode the panel happens to be in. */
+  const stateOf = useCallback(
+    (key: PreferenceKey, value: string): PreferenceState =>
+      preferenceState(value, current[key], current[AVOID_KEY[key]]),
+    [current],
+  );
+
+  const preferredCount = current.genres.length + current.type.length + current.ageRating.length + current.source.length;
+  const avoidedCount =
+    current.avoidGenres.length + current.avoidType.length + current.avoidAgeRating.length + current.avoidSource.length;
+
+  /** Empties one direction and leaves the other alone. */
+  const clearDirection = useCallback(
+    (direction: PreferenceMode) => {
+      push(
+        direction === 'prefer'
+          ? { genres: [], type: [], ageRating: [], source: [] }
+          : { avoidGenres: [], avoidType: [], avoidAgeRating: [], avoidSource: [] },
+      );
+    },
+    [push],
+  );
+
   const activeCount =
     current.genres.length +
     current.type.length +
     current.status.length +
     current.ageRating.length +
     current.source.length +
+    current.avoidGenres.length +
+    current.avoidType.length +
+    current.avoidAgeRating.length +
+    current.avoidSource.length +
     (current.season ? 1 : 0) +
     (current.year ? 1 : 0) +
     (current.language ? 1 : 0) +
@@ -212,16 +284,75 @@ export function FilterPanel({ years }: { years: number[] }) {
 
       {expanded ? (
         <div className="space-y-5 border-t border-line-soft p-4">
+          {/* Which way a press counts, and what is currently set each way. */}
+          <div className="rounded-lg border border-line-soft bg-base/60 p-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="text-[12px] font-semibold uppercase tracking-wide text-ink-faint">Pressing a tag means</span>
+              <div className="inline-flex rounded-lg border border-line-soft p-0.5" role="group" aria-label="What pressing a tag means">
+                {(
+                  [
+                    { key: 'prefer', label: 'I like this' },
+                    { key: 'avoid', label: "I don't want this" },
+                  ] as const
+                ).map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    aria-pressed={mode === option.key}
+                    onClick={() => setMode(option.key)}
+                    className={cn(
+                      'rounded-[6px] px-2.5 py-1 text-[12.5px] font-semibold transition',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+                      mode === option.key
+                        ? option.key === 'prefer'
+                          ? 'bg-brand text-white'
+                          : 'bg-danger/20 text-danger'
+                        : 'text-ink-muted hover:text-ink',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+              Tags you like narrow the results to titles that carry them. Tags you don’t want are left out of the
+              results entirely, search included. A tag can only be one or the other, so choosing it on one side takes
+              it off the other.
+            </p>
+            {preferredCount > 0 || avoidedCount > 0 ? (
+              <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11.5px]">
+                {preferredCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => clearDirection('prefer')}
+                    className="rounded-md bg-surface-2 px-2 py-1 font-medium text-ink-muted transition hover:text-ink"
+                  >
+                    Clear {preferredCount} liked
+                  </button>
+                ) : null}
+                {avoidedCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => clearDirection('avoid')}
+                    className="rounded-md bg-surface-2 px-2 py-1 font-medium text-ink-muted transition hover:text-danger"
+                  >
+                    Clear {avoidedCount} unwanted
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
           <Group title="Genre">
             <div className="flex flex-wrap gap-1.5">
               {genres.map((genre) => (
-                <Chip
+                <PreferenceChip
                   key={genre.slug}
-                  active={current.genres.includes(genre.slug)}
-                  onClick={() => toggleInList('genres', genre.slug, current.genres)}
-                >
-                  {genre.name}
-                </Chip>
+                  name={genre.name}
+                  state={stateOf('genres', genre.slug)}
+                  onClick={() => togglePreference('genres', genre.slug)}
+                />
               ))}
             </div>
           </Group>
@@ -230,9 +361,12 @@ export function FilterPanel({ years }: { years: number[] }) {
             <Group title="Type">
               <div className="flex flex-wrap gap-1.5">
                 {TYPES.map((t) => (
-                  <Chip key={t} active={current.type.includes(t)} onClick={() => toggleInList('type', t, current.type)}>
-                    {label(t)}
-                  </Chip>
+                  <PreferenceChip
+                    key={t}
+                    name={label(t)}
+                    state={stateOf('type', t)}
+                    onClick={() => togglePreference('type', t)}
+                  />
                 ))}
               </div>
             </Group>
@@ -294,13 +428,12 @@ export function FilterPanel({ years }: { years: number[] }) {
             <Group title="Age rating">
               <div className="flex flex-wrap gap-1.5">
                 {RATINGS.map((r) => (
-                  <Chip
+                  <PreferenceChip
                     key={r}
-                    active={current.ageRating.includes(r)}
-                    onClick={() => toggleInList('ageRating', r, current.ageRating)}
-                  >
-                    {label(r)}
-                  </Chip>
+                    name={label(r)}
+                    state={stateOf('ageRating', r)}
+                    onClick={() => togglePreference('ageRating', r)}
+                  />
                 ))}
               </div>
             </Group>
@@ -308,13 +441,12 @@ export function FilterPanel({ years }: { years: number[] }) {
             <Group title="Source">
               <div className="flex flex-wrap gap-1.5">
                 {SOURCES.map((s) => (
-                  <Chip
+                  <PreferenceChip
                     key={s}
-                    active={current.source.includes(s)}
-                    onClick={() => toggleInList('source', s, current.source)}
-                  >
-                    {label(s)}
-                  </Chip>
+                    name={label(s)}
+                    state={stateOf('source', s)}
+                    onClick={() => togglePreference('source', s)}
+                  />
                 ))}
               </div>
             </Group>
@@ -382,6 +514,48 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       )}
     >
       {children}
+    </button>
+  );
+}
+
+/**
+ * A chip that can be wanted, unwanted, or neither.
+ *
+ * The three states carry a mark as well as a colour — a tick for wanted, a
+ * crossed-out circle for unwanted — because a red chip and a purple one are the
+ * same chip to anyone who cannot tell them apart. The state is also spelled out
+ * in the accessible name, so it does not depend on seeing either.
+ */
+function PreferenceChip({
+  name,
+  state,
+  onClick,
+}: {
+  name: string;
+  state: PreferenceState;
+  onClick: () => void;
+}) {
+  const described = state === 'prefer' ? `${name}, preferred` : state === 'avoid' ? `${name}, avoided` : name;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={described}
+      title={described}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium transition',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70',
+        state === 'prefer' && 'bg-brand text-white',
+        state === 'avoid' && 'bg-danger/15 text-danger ring-1 ring-danger/45 line-through decoration-danger/60',
+        state === 'off' && 'bg-surface-2 text-ink-soft hover:bg-surface-3 hover:text-ink',
+      )}
+    >
+      {state !== 'off' ? (
+        <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" aria-hidden="true">
+          {state === 'prefer' ? <path d="m5 13 4 4L19 7" /> : <path d="M5 5l14 14M19 5 5 19" />}
+        </svg>
+      ) : null}
+      {name}
     </button>
   );
 }

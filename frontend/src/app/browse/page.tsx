@@ -46,6 +46,14 @@ function normalise(params: SearchParams): Record<string, string | undefined> {
     'genres',
     'type',
     'status',
+    // The avoid side of the four preference filters. Listed here and nowhere
+    // else: this whitelist is what reaches the API and what the pagination
+    // links are rebuilt from, so a parameter missing here would silently be
+    // dropped on page two.
+    'avoidGenres',
+    'avoidType',
+    'avoidAgeRating',
+    'avoidSource',
     'season',
     'year',
     'ageRating',
