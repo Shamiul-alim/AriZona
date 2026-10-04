@@ -77,6 +77,11 @@ const ONCE = process.argv.includes('--once');
 const CHECK = process.argv.includes('--check');
 /** Reported with the heartbeat so a support question can start from a build. */
 const WORKER_VERSION = process.env.MEDIA_WORKER_VERSION ?? '1.0.0';
+/**
+ * How often presence is reported. Must stay comfortably below the API's online
+ * window (100s) so a missed beat or two does not read as a dead worker.
+ */
+const HEARTBEAT_SECONDS = Math.max(5, Number(process.env.HEARTBEAT_SECONDS ?? 25));
 
 const MB = (n: number) => (n / 1024 ** 2).toFixed(1);
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -107,6 +112,8 @@ async function api<T>(pathname: string, init: { method?: string; body?: unknown 
 
 /** What this worker is on, for the heartbeat. Null between jobs. */
 let currentJobLabel: string | null = null;
+/** The step it is on, so a beat sent by the timer can say so too. */
+let currentStep: string | null = null;
 
 /**
  * Best-effort progress. A failed report must never fail the job.
@@ -115,10 +122,32 @@ let currentJobLabel: string | null = null;
  * still there” are answered by one call and cannot drift apart.
  */
 async function progress(jobId: string, stepName: string, detail?: string): Promise<void> {
+  currentStep = stepName;
   await Promise.all([
     api(`/media-worker/jobs/${jobId}/progress`, { body: { step: stepName, detail } }).catch(() => undefined),
     heartbeat('BUSY', currentJobLabel, stepName),
   ]);
+}
+
+/**
+ * Reports presence on a clock rather than on progress.
+ *
+ * Beats used to be sent only when something happened: once per poll, and once
+ * per step of a job. Any single step that outlasts the window the API counts a
+ * worker as online for — downloading a 400MB source comfortably does — left
+ * presence stale, and the admin panel said OFFLINE about a worker that was busy
+ * working. The interval keeps that honest no matter how long a step takes, and
+ * it is well inside the window so a couple of missed beats are survivable.
+ */
+function startHeartbeat(): () => void {
+  const send = () => {
+    void heartbeat(currentJobLabel ? 'BUSY' : 'IDLE', currentJobLabel, currentStep);
+  };
+  send();
+  const timer = setInterval(send, HEARTBEAT_SECONDS * 1000);
+  // Never hold the process open on this alone.
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 // --- identity ---------------------------------------------------------------
@@ -790,6 +819,7 @@ async function tick(): Promise<number> {
     try {
       await processJob({ ...job, ...claimed });
       currentJobLabel = null;
+      currentStep = null;
       done++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -798,6 +828,7 @@ async function tick(): Promise<number> {
       // leaving an episode that looks finished with nothing to play.
       await api(`/media-worker/jobs/${job.id}/complete`, { body: { ready: false, error: message } }).catch(() => undefined);
       currentJobLabel = null;
+      currentStep = null;
     }
   }
   return done;
@@ -894,8 +925,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  await heartbeat('IDLE');
-  log(`Worker ${WORKER_ID.slice(0, 8)}… polling every ${POLL_SECONDS}s. SIGTERM or Ctrl+C to stop.`);
+  const stopHeartbeat = startHeartbeat();
+  log(
+    `Worker ${WORKER_ID.slice(0, 8)}… polling every ${POLL_SECONDS}s, ` +
+      `reporting presence every ${HEARTBEAT_SECONDS}s. SIGTERM or Ctrl+C to stop.`,
+  );
   let idle = false;
   while (!stopping) {
     try {
@@ -915,7 +949,9 @@ async function main(): Promise<void> {
   }
   // One last beat with no job, so a clean stop is not mistaken for a worker
   // that died mid-encode.
+  stopHeartbeat();
   currentJobLabel = null;
+  currentStep = null;
   await heartbeat('IDLE');
   log('Stopped.');
 }
