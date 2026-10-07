@@ -17,25 +17,31 @@ import { LatestEpisodesSection } from '@/components/home/LatestEpisodesSection';
 import { TopAnimeSection } from '@/components/home/TopAnimeSection';
 import { AzStrip } from '@/components/anime/AzStrip';
 import { formatRelativeTime } from '@/lib/utils';
+import { createLoader } from '@/lib/unavailable';
 
-// The homepage is fully static between revalidations — every section below is
-// catalogue data that changes on publish, not per request.
-export const revalidate = 120;
-
-async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await promise;
-  } catch {
-    // A single failing rail must not take the whole homepage down.
-    return fallback;
-  }
-}
+/**
+ * Rendered per request, with the catalogue data itself cached.
+ *
+ * It used to be a prerendered page revalidated every two minutes. That tied two
+ * unrelated things to one mechanism: a build could not finish unless the API
+ * answered, and a build is exactly when the API is least likely to — a deploy
+ * while the backend is down failed at prerender. The data is still cached by the
+ * per-request `revalidate` on each fetch below, so the backend is asked no more
+ * often than before; only the HTML is assembled per request.
+ */
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
   const emptyPage: Paginated<AnimeCardType> = {
     data: [],
     meta: { page: 1, limit: 0, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },
   };
+
+  // A single failing rail still degrades quietly; everything failing does not,
+  // because that is the API being unreachable rather than an empty catalogue,
+  // and Next must not be handed a hollow page to cache.
+  const loader = createLoader();
+  const safe = loader.settle;
 
   const [featured, latest, trending, top, newest, added, popular, posts] = await Promise.all([
     safe(apiFetch<FeaturedEntry[]>('/anime/featured', { revalidate: 120 }), []),
@@ -55,6 +61,8 @@ export default async function HomePage() {
       { ...emptyPage, data: [] } as unknown as Paginated<CommunityPostSummary>,
     ),
   ]);
+
+  loader.assertAnythingLoaded();
 
   return (
     <>

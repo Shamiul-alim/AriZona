@@ -82,11 +82,15 @@ export default async function BrowsePage({ searchParams }: { searchParams: Promi
   const query = normalise(params);
   const page = Number(query.page ?? 1);
 
+  // The results are the page. A failure here used to fall back to an empty
+  // list, which rendered "No titles match these filters" — telling the visitor
+  // their search found nothing when in fact nothing was asked. It now throws to
+  // the error boundary, which says what actually happened.
+  //
+  // The year list is decorative: losing it costs one dropdown, so it keeps its
+  // fallback.
   const [results, years] = await Promise.all([
-    apiFetch<Paginated<AnimeCard>>(`/anime${qs({ ...query, limit: query.limit ?? 28 })}`, { revalidate: 60 }).catch(() => ({
-      data: [],
-      meta: { page: 1, limit: 28, total: 0, totalPages: 0, hasPrevious: false, hasNext: false },
-    })),
+    apiFetch<Paginated<AnimeCard>>(`/anime${qs({ ...query, limit: query.limit ?? 28 })}`, { revalidate: 60 }),
     apiFetch<number[]>('/years', { revalidate: 3600 }).catch(() => []),
   ]);
 
