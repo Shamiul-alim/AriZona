@@ -227,6 +227,48 @@ Health endpoints, suitable for an uptime monitor:
 
 ---
 
+## Bandwidth
+
+Every video byte a visitor watches is read from Drive by the API and piped to the
+browser by it (`GET /api/media/stream/:variantId`). That is deliberate — it keeps
+file ids private, serves signed short-lived URLs, and forwards Range requests so
+seeking works — but it means **watching is backend egress**, not Drive egress.
+
+The arithmetic decides whether a host is viable:
+
+| | |
+|---|---|
+| One 1080p episode | ~400 MB |
+| A 5 GB monthly allowance | ~12 episode views |
+| One episode uploaded through the API | ~400 MB *out* again, on the way to Drive |
+| One source pulled by the worker through the API | ~400 MB |
+
+A free or hobby tier measured in single-digit gigabytes will be exhausted by
+ordinary use, and when it is, the host suspends the service: the API returns 503
+for everything and the site has no data, however healthy the database is.
+
+What actually reduces it, in order of effect:
+
+1. **Let the worker read Drive directly.** A worker credential that can read the
+   source needs nothing from the API — see `MEDIA_WORKER_ALLOW_API_SOURCE` in
+   `docs/MEDIA_WORKER_DEPLOYMENT.md`. This is the one saving that costs nothing.
+2. **Put the catalogue behind a cache.** The frontend already caches API
+   responses, so repeated page views cost the backend nothing; verified at six
+   homepage loads for one upstream request. Keep the per-fetch `revalidate`
+   values when editing server components.
+3. **Serve video from somewhere with transfer to spare.** Proxying through the
+   API is what consumes the allowance. Moving playback off it is an
+   architectural change, not a setting:
+   - a redirect to Drive breaks the player's `crossOrigin="anonymous"`, and
+     Drive's download endpoint serves an interstitial for large files;
+   - files an administrator pasted are private to them, so a redirect would 404
+     for everyone else;
+   - so this needs a storage host that speaks ranged, CORS-friendly HTTP.
+
+Until then, treat the backend's transfer allowance as the site's view budget.
+
+---
+
 ## Troubleshooting
 
 **Backend restarts in a loop.** Almost always the database. `docker compose logs

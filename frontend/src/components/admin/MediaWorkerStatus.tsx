@@ -70,9 +70,42 @@ export function MediaWorkerStatus({ pollMs = 20_000 }: { pollMs?: number }) {
   }, []);
 
   useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), pollMs);
-    return () => clearInterval(timer);
+    // Only poll while someone is looking. An admin tab left open overnight was
+    // asking the API for worker presence every twenty seconds regardless —
+    // thousands of requests nobody would ever read, against a backend whose
+    // monthly bandwidth is finite. Becoming visible refreshes at once, so the
+    // panel is never showing a stale answer when it is actually being read.
+    let timer: ReturnType<typeof setInterval> | undefined;
+
+    const start = () => {
+      if (timer !== undefined) return;
+      timer = setInterval(() => void load(), pollMs);
+    };
+    const stop = () => {
+      if (timer === undefined) return;
+      clearInterval(timer);
+      timer = undefined;
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stop();
+      } else {
+        void load();
+        start();
+      }
+    };
+
+    if (!document.hidden) {
+      void load();
+      start();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [load, pollMs]);
 
   if (failed || !presence) return null;

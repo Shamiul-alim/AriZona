@@ -82,6 +82,42 @@ const WORKER_VERSION = process.env.MEDIA_WORKER_VERSION ?? '1.0.0';
  * window (100s) so a missed beat or two does not read as a dead worker.
  */
 const HEARTBEAT_SECONDS = Math.max(5, Number(process.env.HEARTBEAT_SECONDS ?? 25));
+/**
+ * Whether a source this worker cannot open in Drive may be pulled through the
+ * API instead.
+ *
+ * It is the only thing that makes a pasted Drive link work for a worker whose
+ * credential is scoped to its own files, so it defaults to on. It is also
+ * expensive in a way nothing else here is: every byte of the source travels out
+ * of the API's host, and a hosted backend's monthly transfer allowance is
+ * measured in gigabytes while episodes are measured in hundreds of megabytes.
+ * Granting the worker's Drive credential read access removes the need for it
+ * entirely — see docs/GOOGLE_DRIVE.md.
+ */
+const ALLOW_API_SOURCE = process.env.MEDIA_WORKER_ALLOW_API_SOURCE !== 'false';
+
+/**
+ * A one-line version of an error body.
+ *
+ * When the API is reachable it answers JSON and the message is the useful part.
+ * When the *platform* in front of it answers instead — suspended, rate limited,
+ * sleeping — the body is an HTML page, and logging that verbatim buried the one
+ * fact that mattered under a document.
+ */
+function summarise(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) return '(no body)';
+  if (trimmed.startsWith('<')) {
+    const title = /<title[^>]*>([^<]+)<\/title>/i.exec(trimmed)?.[1]?.trim();
+    const text = trimmed
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return `${title ? `${title}: ` : ''}${text.slice(0, 160)}`.trim() || '(html error page)';
+  }
+  return trimmed.slice(0, 300);
+}
 
 const MB = (n: number) => (n / 1024 ** 2).toFixed(1);
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -106,7 +142,7 @@ async function api<T>(pathname: string, init: { method?: string; body?: unknown 
     body: init.body ? JSON.stringify(init.body) : undefined,
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${init.method ?? 'GET'} ${pathname} -> ${res.status} ${text.slice(0, 300)}`);
+  if (!res.ok) throw new Error(`${init.method ?? 'GET'} ${pathname} -> ${res.status} ${summarise(text)}`);
   return text ? (JSON.parse(text) as T) : (null as T);
 }
 
@@ -423,6 +459,13 @@ async function downloadTrackSource(jobId: string, fileId: string, dest: string):
     });
   } catch (error) {
     if (!isAccessRefusal(error)) throw error;
+    if (!ALLOW_API_SOURCE) {
+      throw new Error(
+        'This worker cannot open the source in Drive, and pulling it through AniZora is switched off ' +
+          '(MEDIA_WORKER_ALLOW_API_SOURCE=false). Give the worker credential read access to the file, ' +
+          'or re-enable the fallback.',
+      );
+    }
     step('download', 'not readable with this worker credential — asking AniZora for it');
     await downloadViaApi(jobId, dest);
     return;
@@ -456,7 +499,10 @@ async function downloadViaApi(jobId: string, dest: string): Promise<void> {
     fs.rmSync(dest, { force: true });
     throw new Error(`Download incomplete: expected ${expected} bytes, got ${got}`);
   }
-  step('download', `${MB(got)} MB (via AniZora)`);
+  step(
+    'download',
+    `${MB(got)} MB (via AniZora — this much left the API's host; give the worker Drive read access to avoid it)`,
+  );
 }
 
 // --- encoding ---------------------------------------------------------------
