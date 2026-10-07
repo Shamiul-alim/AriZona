@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { apiFetch } from '@/lib/api';
 import { ADS, ADSTERRA } from '@/lib/config';
 import { AdsterraBanner } from './AdsterraBanner';
-import type { AdsConfig, DisplayPlacement } from '@/lib/types';
+import type { DisplayPlacement } from '@/lib/types';
+import { loadAdsConfig } from '@/lib/ads-config';
 import { cn } from '@/lib/utils';
 
 /**
@@ -21,18 +21,6 @@ import { cn } from '@/lib/utils';
  * Placement configuration is fetched from the admin-managed API, so slots can
  * be switched on and off without a deploy.
  */
-
-let configPromise: Promise<AdsConfig> | null = null;
-
-function loadAdsConfig(): Promise<AdsConfig> {
-  if (!configPromise) {
-    configPromise = apiFetch<AdsConfig>('/ads/config').catch(() => ({
-      display: [],
-      video: { enabled: false as const },
-    }));
-  }
-  return configPromise;
-}
 
 let scriptInjected = false;
 

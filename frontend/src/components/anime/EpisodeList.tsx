@@ -132,6 +132,10 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
               <Link
                 key={ep.id}
                 href={`/watch/${animeSlug}/ep-${ep.number}`}
+                // A viewer opens one episode, not the twelve in view. Each
+                // speculative prefetch is a whole dynamic render of a watch
+                // page, API call included, for a link nobody pressed.
+                prefetch={false}
                 title={ep.title ?? `Episode ${ep.seasonEpisodeNumber}`}
                 className={cn(
                   'grid h-10 place-items-center rounded-lg text-[13px] font-semibold transition',
@@ -152,6 +156,7 @@ export function EpisodeList({ animeSlug, episodes, currentEpisode, compact = fal
                 <li key={ep.id}>
                   <Link
                     href={`/watch/${animeSlug}/ep-${ep.number}`}
+                    prefetch={false}
                     className={cn(
                       'group/row flex items-center gap-3 px-3 py-2.5 transition',
                       isCurrent ? 'bg-brand/12' : 'hover:bg-white/5',

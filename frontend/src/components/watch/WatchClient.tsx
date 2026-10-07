@@ -4,10 +4,9 @@ import { SmartImage as Image } from '@/components/ui/SmartImage';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiFetch } from '@/lib/api';
+import { loadAdsConfig } from '@/lib/ads-config';
 import { authFetch, useAuthStore } from '@/lib/auth-store';
 import type {
-  AdsConfig,
   AnimeCard,
   EpisodeNeighbour,
   EpisodeProgress,
@@ -65,7 +64,7 @@ export function WatchClient({ payload, episodes, recommendations }: WatchClientP
   const { anime, episode, navigation, playback, downloads } = payload;
 
   useEffect(() => {
-    apiFetch<AdsConfig>('/ads/config')
+    loadAdsConfig()
       .then((config) => {
         setAdConfig(config.video.enabled ? { ...config.video, enabled: true } : null);
       })

@@ -197,6 +197,10 @@ export function SiteHeader() {
                 <Link
                   key={genre.slug}
                   href={`/genres/${genre.slug}`}
+                  // Two dozen links appear the moment this menu opens, and each
+                  // genre page is rendered on demand. Prefetching all of them
+                  // to serve the one that gets clicked is the wrong trade.
+                  prefetch={false}
                   className="truncate rounded-lg px-3 py-2 text-[13px] text-ink-soft transition hover:bg-white/8 hover:text-ink"
                 >
                   {genre.name}
@@ -467,6 +471,7 @@ export function SiteHeader() {
                 <Link
                   key={genre.slug}
                   href={`/genres/${genre.slug}`}
+                  prefetch={false}
                   className="rounded-full bg-surface-2 px-3 py-1 text-[12px] text-ink-soft transition hover:bg-surface-3"
                 >
                   {genre.name}

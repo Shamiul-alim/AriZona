@@ -7,7 +7,13 @@ export function EpisodeCard({ episode }: { episode: LatestEpisode }) {
   const { anime } = episode;
 
   return (
-    <Link href={`/watch/${anime.slug}/ep-${episode.number}`} className="group/ep block" aria-label={`${anime.titleEnglish} episode ${episode.number}`}>
+    <Link
+      href={`/watch/${anime.slug}/ep-${episode.number}`}
+      // See EpisodeList: episode grids are many links and one click.
+      prefetch={false}
+      className="group/ep block"
+      aria-label={`${anime.titleEnglish} episode ${episode.number}`}
+    >
       <div className="relative aspect-video overflow-hidden rounded-xl bg-surface-2 ring-1 ring-line-soft transition-all duration-300 group-hover/ep:ring-brand/60">
         {episode.thumbnailUrl ? (
           <Image

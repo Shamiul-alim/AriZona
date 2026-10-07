@@ -11,6 +11,7 @@ import type {
   WatchPayload,
 } from '@/lib/types';
 import { cn, formatTime } from '@/lib/utils';
+import { optimizedImageUrl } from '@/lib/images';
 import { SettingsMenu } from './SettingsMenu';
 import { SubtitleCues, SubtitleTrack } from './SubtitleLayer';
 import { useExternalAudio } from './useExternalAudio';
@@ -554,7 +555,7 @@ export function VideoPlayer({
         className="h-full w-full bg-black"
         playsInline
         preload="metadata"
-        poster={episode.thumbnailUrl ?? payload.anime.bannerUrl ?? undefined}
+        poster={optimizedImageUrl(episode.thumbnailUrl ?? payload.anime.bannerUrl, 1280, 65)}
         crossOrigin="anonymous"
       >
         {/* Must be a child of <video> for the TextTrack API to pick it up. */}

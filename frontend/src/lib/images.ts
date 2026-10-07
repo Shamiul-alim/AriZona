@@ -40,3 +40,22 @@ export function isOptimizableSrc(src: string): boolean {
     return false;
   }
 }
+
+/**
+ * An optimizer URL for an image that cannot be a `next/image` element.
+ *
+ * A `<video poster>` is an attribute, not a component, so it bypasses
+ * `next/image` entirely and the browser fetches whatever the API stored — a
+ * 1.5MB banner, before the video has even been asked to play, on a page whose
+ * whole job is to start playing quickly. Pointing the attribute at the
+ * optimizer gives the same picture at a fraction of the bytes, in AVIF or WebP
+ * where the browser supports it.
+ *
+ * Returns the source untouched when it is not ours to optimize, which keeps the
+ * optimizer from being used as a proxy for arbitrary URLs.
+ */
+export function optimizedImageUrl(src: string | null | undefined, width = 1200, quality = 70): string | undefined {
+  if (!src) return undefined;
+  if (!isOptimizableSrc(src)) return src;
+  return `/_next/image?url=${encodeURIComponent(src)}&w=${width}&q=${quality}`;
+}
