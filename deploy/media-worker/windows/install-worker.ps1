@@ -89,7 +89,7 @@ if (-not $UseExistingConfig) {
     Write-Note 'Values are hidden as you type and are never echoed back.'
     Write-Host ''
 
-    $defaultApi = 'https://arizona-3.onrender.com/api'
+    $defaultApi = 'https://arizona-fum7.onrender.com/api'
     $apiUrl = Read-Host "  AniZora API URL [$defaultApi]"
     if ([string]::IsNullOrWhiteSpace($apiUrl)) { $apiUrl = $defaultApi }
 

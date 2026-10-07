@@ -141,6 +141,8 @@ given one; skip it otherwise.
 | `MIN_FREE_DISK_BYTES` | no | `12884901888` (12 GB) | A job is refused below this. |
 | `MAX_CACHE_BYTES` | no | `8589934592` (8 GB) | Rendition cache ceiling in Drive. |
 | `POLL_SECONDS` | no | `30` | Queue poll interval. |
+| `HEARTBEAT_SECONDS` | no | `25` | Presence interval. Must stay under the API's 100s online window. |
+| `MEDIA_WORKER_ALLOW_API_SOURCE` | no | `true` | Allow pulling a source the worker cannot open in Drive through the API. Convenient, but every byte counts against the backend host's transfer allowance — see *Bandwidth*. |
 | `RENDITION_FOLDER` | no | `AniZora _renditions` | Drive folder for generated media. |
 | `FFMPEG_PRESET` / `FFMPEG_CRF` | no | `veryfast` / `23` | Speed/size trade-off. |
 
@@ -402,7 +404,7 @@ shell history.
 
 | | |
 | --- | --- |
-| `API_URL` | `https://arizona-3.onrender.com/api` |
+| `API_URL` | `https://arizona-fum7.onrender.com/api` |
 | `MEDIA_WORKER_TOKEN` | Must match the Render backend exactly |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | Optional — narrows reading to read-only |
 | `GOOGLE_DRIVE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN` | Writing generated media |

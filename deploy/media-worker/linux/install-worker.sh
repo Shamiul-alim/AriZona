@@ -79,7 +79,7 @@ if [ "$KEEP_CONFIG" != 1 ]; then
   grey "  Values are hidden as you type and are never echoed back."
   echo
 
-  DEFAULT_API="https://arizona-3.onrender.com/api"
+  DEFAULT_API="https://arizona-fum7.onrender.com/api"
   read -r -p "  AniZora API URL [$DEFAULT_API]: " API_URL
   API_URL="${API_URL:-$DEFAULT_API}"
 
