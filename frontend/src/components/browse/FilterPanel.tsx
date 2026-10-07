@@ -8,6 +8,7 @@ import { useAuthStore } from '@/lib/auth-store';
 import type { GenreRef } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { selectFieldSm } from '@/components/ui/Select';
+import { Dropdown } from '@/components/ui/Dropdown';
 
 /**
  * The text-input twin of selectFieldSm: same height, border and surface, but no
@@ -348,19 +349,15 @@ export function FilterPanel({ years }: { years: number[] }) {
             <path d="m20 20-3.2-3.2" strokeLinecap="round" />
           </svg>
         </form>
-
-        <select
+        {/* Nine options and the most-used control on the page: worth the custom
+            list so it opens into the site rather than system chrome. */}
+        <Dropdown
           value={params.get('sort') || 'default'}
-          onChange={(e) => push({ sort: e.target.value === 'default' ? undefined : e.target.value })}
-          aria-label="Sort by"
-          className={selectFieldSm}
-        >
-          {SORTS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+          options={SORTS}
+          onChange={(next) => push({ sort: next === 'default' ? undefined : next })}
+          label="Sort by"
+          className="w-44 shrink-0"
+        />
 
         <button
           type="button"
